@@ -56,4 +56,17 @@ application "incident-commander" {
   // env "EXTERNAL_API_KEY" {
   //   secret = true
   // }
+
+  // Slack integration environment variables
+  env "SLACK_SIGNING_SECRET" {
+    secret = true
+  }
+
+  env "SLACK_BOT_TOKEN" {
+    secret = true
+  }
+
+  env "SLACK_CHANNEL" {
+    secret = true
+  }
 }
