@@ -1,8 +1,0 @@
-application "nightrider-mvp" {
-  service "hello" {
-    visibility = "public"
-    domain {
-      cname = "hello-test"
-    }
-  }
-}

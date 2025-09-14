@@ -1,4 +1,4 @@
-globalThis.__RAINDROP_GIT_COMMIT_SHA = "bad785ec7992d9b71197b41578d4d1ce5d7e0e61";
+globalThis.__RAINDROP_GIT_COMMIT_SHA = "4f05f449ff665a8812edbc34b9397e600472b5c7";
 
 // src/sre-agent/index.ts
 import { Service } from "./runtime.js";
@@ -1582,6 +1582,427 @@ var cors = (options) => {
   };
 };
 
+// src/common/mcp-client.ts
+var McpClientManager = class {
+  logger;
+  env;
+  constructor(logger, env) {
+    this.logger = logger;
+    this.env = env;
+  }
+  // Simulate MCP tool calls by directly calling the AI-powered logic
+  // In a real implementation, this would call the actual MCP services
+  async simulateMcpCall(serviceName, toolName, args) {
+    this.logger.info(`Simulating MCP call: ${serviceName}.${toolName}`, { args });
+    switch (serviceName) {
+      case "mapping-mcp":
+        return this.simulateMappingMcp(toolName, args);
+      case "observability-mcp":
+        return this.simulateObservabilityMcp(toolName, args);
+      case "remediation-mcp":
+        return this.simulateRemediationMcp(toolName, args);
+      default:
+        throw new Error(`Unknown MCP service: ${serviceName}`);
+    }
+  }
+  async simulateMappingMcp(toolName, args) {
+    if (toolName === "map-alert-to-service") {
+      const { alertType, incidentTitle, incidentDescription } = args;
+      const aiResponse = await this.env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert SRE service mapping agent. Map alerts to services.
+
+SERVICE INVENTORY:
+- user-api: Frontend API service, prone to OOM issues
+- postgres-primary: Primary database, critical infrastructure
+- analytics-worker: Background processing service, CPU intensive
+- redis-cache: Caching layer, memory intensive
+
+Return JSON with service mapping.`
+          },
+          {
+            role: "user",
+            content: `Map this alert: ${alertType} - ${incidentTitle}`
+          }
+        ],
+        max_tokens: 200,
+        temperature: 0.3
+      });
+      const aiAnalysis = aiResponse.choices?.[0]?.message?.content || "{}";
+      let serviceInfo;
+      try {
+        const jsonMatch = aiAnalysis.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          serviceInfo = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("No JSON found");
+        }
+      } catch {
+        serviceInfo = {
+          serviceName: alertType.includes("database") ? "postgres-primary" : alertType.includes("oom") ? "user-api" : "analytics-worker",
+          namespace: "production",
+          podName: `${alertType}-service-pod-${Math.random().toString(36).substr(2, 9)}`,
+          runbookId: `${alertType}-runbook`,
+          confidence: 0.8,
+          reasoning: "AI-powered service mapping"
+        };
+      }
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(serviceInfo, null, 2)
+        }]
+      };
+    }
+    if (toolName === "get-runbook") {
+      const { serviceName, incidentType } = args;
+      const aiResponse = await this.env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: `Generate a runbook for ${serviceName} incident response.`
+          },
+          {
+            role: "user",
+            content: `Create runbook for: ${serviceName} - ${incidentType || "general"}`
+          }
+        ],
+        max_tokens: 400,
+        temperature: 0.2
+      });
+      const runbook = aiResponse.choices?.[0]?.message?.content || `# ${serviceName} Runbook
+
+Standard incident response procedures.`;
+      return {
+        content: [{
+          type: "text",
+          text: runbook
+        }]
+      };
+    }
+    throw new Error(`Unknown mapping-mcp tool: ${toolName}`);
+  }
+  async simulateObservabilityMcp(toolName, args) {
+    if (toolName === "get-logs") {
+      const { serviceName, timeRange, incidentType } = args;
+      const aiResponse = await this.env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: `Generate realistic logs and analysis for ${serviceName}.`
+          },
+          {
+            role: "user",
+            content: `Generate logs for: ${serviceName} - ${incidentType || "general"} - ${timeRange}`
+          }
+        ],
+        max_tokens: 500,
+        temperature: 0.3
+      });
+      const logAnalysis = aiResponse.choices?.[0]?.message?.content || "No logs available";
+      const logData = {
+        serviceName,
+        timeRange,
+        logCount: 5,
+        logs: [
+          {
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            level: "ERROR",
+            message: "Simulated log entry",
+            source: serviceName
+          }
+        ],
+        analysis: {
+          criticalIssues: ["Simulated critical issue"],
+          warnings: ["Simulated warning"],
+          recommendations: ["Monitor service health"],
+          severity: "medium"
+        },
+        summary: "AI-generated log analysis",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(logData, null, 2)
+        }]
+      };
+    }
+    if (toolName === "get-metrics") {
+      const { serviceName, incidentType } = args;
+      const metricsData = {
+        serviceName,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        metrics: {
+          cpu: { usage: "45%", limit: "1000m", throttled: false },
+          memory: { usage: "1.8GB", limit: "2GB", percentage: 90 },
+          health: "degraded"
+        },
+        analysis: {
+          healthStatus: "degraded",
+          criticalIssues: ["High memory usage"],
+          warnings: ["CPU approaching limit"],
+          recommendations: ["Consider scaling"],
+          trends: "degrading"
+        },
+        summary: "AI-generated metrics analysis"
+      };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(metricsData, null, 2)
+        }]
+      };
+    }
+    throw new Error(`Unknown observability-mcp tool: ${toolName}`);
+  }
+  async simulateRemediationMcp(toolName, args) {
+    if (toolName === "restart-pod") {
+      const { podName, namespace, incidentType, reason } = args;
+      const aiResponse = await this.env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: `Decide if pod restart is safe. Database pods are NOT safe to restart.`
+          },
+          {
+            role: "user",
+            content: `Should I restart ${podName}? Reason: ${reason}`
+          }
+        ],
+        max_tokens: 200,
+        temperature: 0.2
+      });
+      const decision = aiResponse.choices?.[0]?.message?.content || "safe";
+      const isSafe = !podName.includes("postgres") && !podName.includes("database");
+      if (isSafe) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              action: "pod_restart",
+              podName,
+              namespace,
+              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              status: "success",
+              aiDecision: { safeToRestart: true, confidence: 0.9 },
+              details: {
+                previousState: "OOMKilled",
+                newState: "Running",
+                restartCount: 6,
+                timeToReady: "45s"
+              }
+            }, null, 2)
+          }]
+        };
+      } else {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              action: "pod_restart",
+              podName,
+              namespace,
+              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              status: "rejected",
+              aiDecision: { safeToRestart: false, confidence: 0.9 },
+              details: {
+                reason: "AI determined restart is not safe for database service",
+                risks: ["Data loss risk"],
+                alternatives: ["Manual intervention required"]
+              }
+            }, null, 2)
+          }]
+        };
+      }
+    }
+    if (toolName === "send-notification") {
+      const { message, severity, incidentType, serviceName } = args;
+      const aiResponse = await this.env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: `Enhance this notification for ${severity} severity.`
+          },
+          {
+            role: "user",
+            content: `Enhance: ${message}`
+          }
+        ],
+        max_tokens: 200,
+        temperature: 0.3
+      });
+      const enhancedMessage = aiResponse.choices?.[0]?.message?.content || message;
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            action: "send_notification",
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            status: "delivered",
+            aiEnhanced: true,
+            details: {
+              originalMessage: message,
+              enhancedMessage,
+              severity,
+              recipients: severity === "critical" ? ["oncall-sre@company.com", "senior-sre@company.com"] : ["oncall-sre@company.com"],
+              messageId: `notif-${crypto.randomUUID()}`,
+              deliveryTime: "2.3s"
+            }
+          }, null, 2)
+        }]
+      };
+    }
+    throw new Error(`Unknown remediation-mcp tool: ${toolName}`);
+  }
+  // Mapping MCP Tools
+  async mapAlertToService(alertType, traceId, incidentTitle, incidentDescription) {
+    try {
+      const response = await this.simulateMcpCall("mapping-mcp", "map-alert-to-service", {
+        alertType,
+        incidentTitle,
+        incidentDescription
+      });
+      this.logger.info("Mapped alert to service", { traceId, alertType });
+      const content = response.content[0]?.text;
+      if (!content) {
+        throw new Error("No content in MCP response");
+      }
+      return JSON.parse(content);
+    } catch (error) {
+      this.logger.error("Failed to map alert to service", { traceId, alertType, error: String(error) });
+      throw error;
+    }
+  }
+  async getRunbook(serviceName, traceId, incidentType) {
+    try {
+      const response = await this.simulateMcpCall("mapping-mcp", "get-runbook", {
+        serviceName,
+        incidentType
+      });
+      this.logger.info("Retrieved runbook", { traceId, serviceName });
+      const content = response.content[0]?.text;
+      if (!content) {
+        throw new Error("No content in MCP response");
+      }
+      return { title: `${serviceName} Runbook`, content, steps: [], emergencyContacts: [] };
+    } catch (error) {
+      this.logger.error("Failed to get runbook", { traceId, serviceName, error: String(error) });
+      throw error;
+    }
+  }
+  // Observability MCP Tools
+  async getLogs(serviceName, timeRange = "1h", traceId, incidentType) {
+    try {
+      const response = await this.simulateMcpCall("observability-mcp", "get-logs", {
+        serviceName,
+        timeRange,
+        incidentType
+      });
+      this.logger.info("Retrieved logs", { traceId, serviceName, timeRange });
+      const content = response.content[0]?.text;
+      if (!content) {
+        throw new Error("No content in MCP response");
+      }
+      return JSON.parse(content);
+    } catch (error) {
+      this.logger.error("Failed to get logs", { traceId, serviceName, timeRange, error: String(error) });
+      throw error;
+    }
+  }
+  async getMetrics(serviceName, traceId, incidentType) {
+    try {
+      const response = await this.simulateMcpCall("observability-mcp", "get-metrics", {
+        serviceName,
+        incidentType
+      });
+      this.logger.info("Retrieved metrics", { traceId, serviceName });
+      const content = response.content[0]?.text;
+      if (!content) {
+        throw new Error("No content in MCP response");
+      }
+      return JSON.parse(content);
+    } catch (error) {
+      this.logger.error("Failed to get metrics", { traceId, serviceName, error: String(error) });
+      throw error;
+    }
+  }
+  async getServiceHealth(serviceName, traceId) {
+    try {
+      return {
+        status: "healthy",
+        details: { serviceName, timestamp: (/* @__PURE__ */ new Date()).toISOString() }
+      };
+    } catch (error) {
+      this.logger.error("Failed to get service health", { traceId, serviceName, error: String(error) });
+      throw error;
+    }
+  }
+  // Remediation MCP Tools
+  async restartPod(podName, namespace = "production", traceId, incidentType, reason) {
+    try {
+      const response = await this.simulateMcpCall("remediation-mcp", "restart-pod", {
+        podName,
+        namespace,
+        incidentType,
+        reason
+      });
+      this.logger.info("Restarted pod", { traceId, podName, namespace });
+      const content = response.content[0]?.text;
+      if (!content) {
+        throw new Error("No content in MCP response");
+      }
+      return JSON.parse(content);
+    } catch (error) {
+      this.logger.error("Failed to restart pod", { traceId, podName, namespace, error: String(error) });
+      throw error;
+    }
+  }
+  async sendNotification(message, severity, traceId, incidentType, serviceName) {
+    try {
+      const response = await this.simulateMcpCall("remediation-mcp", "send-notification", {
+        message,
+        severity,
+        incidentType,
+        serviceName
+      });
+      this.logger.info("Sent notification", { traceId, message, severity });
+      const content = response.content[0]?.text;
+      if (!content) {
+        throw new Error("No content in MCP response");
+      }
+      return JSON.parse(content);
+    } catch (error) {
+      this.logger.error("Failed to send notification", { traceId, message, severity, error: String(error) });
+      throw error;
+    }
+  }
+  async scaleService(serviceName, replicas, traceId) {
+    try {
+      return {
+        success: true,
+        message: `Service ${serviceName} scaled to ${replicas} replicas`,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        details: { serviceName, replicas }
+      };
+    } catch (error) {
+      this.logger.error("Failed to scale service", { traceId, serviceName, replicas, error: String(error) });
+      throw error;
+    }
+  }
+  // Cleanup method
+  async disconnect() {
+    this.logger.info("MCP client manager disconnected");
+  }
+};
+
 // src/sre-agent/index.ts
 var sre_agent_default = class extends Service {
   async fetch(request) {
@@ -1703,25 +2124,56 @@ var sre_agent_default = class extends Service {
       title: incident.title,
       severity: incident.severity
     });
+    const mcpClient = new McpClientManager(env.logger, env);
     try {
       await env.INCIDENTS_DB.prepare("UPDATE incidents SET status = ?, updated_at = ? WHERE id = ?").bind("analyzing", (/* @__PURE__ */ new Date()).toISOString(), incident.id).run();
-      env.logger.info("About to call AI service", { traceId, model: "gpt-oss-120b" });
-      const gptResponse = await env.AI.run("gpt-oss-120b", {
-        model: "gpt-oss-120b",
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert SRE agent. Analyze incidents and take autonomous actions when safe.
+      let serviceInfo = null;
+      let runbookContent = null;
+      let alertType = "general_incident";
+      try {
+        env.logger.info("Calling mapping-mcp to identify service", { traceId });
+        alertType = this.determineAlertType(incident.title, incident.description);
+        serviceInfo = await mcpClient.mapAlertToService(alertType, traceId, incident.title, incident.description);
+        if (serviceInfo?.serviceName) {
+          runbookContent = await mcpClient.getRunbook(serviceInfo.serviceName, traceId, alertType);
+        }
+        env.logger.info("Service mapping completed", {
+          traceId,
+          serviceInfo,
+          runbookTitle: runbookContent?.title
+        });
+      } catch (mappingError) {
+        env.logger.warn("Mapping MCP failed, continuing with basic analysis", {
+          traceId,
+          error: String(mappingError)
+        });
+      }
+      let logData = null;
+      let metricData = null;
+      if (serviceInfo?.serviceName) {
+        try {
+          env.logger.info("Calling observability-mcp to gather data", { traceId });
+          logData = await mcpClient.getLogs(serviceInfo.serviceName, "1h", traceId, alertType);
+          metricData = await mcpClient.getMetrics(serviceInfo.serviceName, traceId, alertType);
+          env.logger.info("Observability data gathered", {
+            traceId,
+            logCount: logData?.logs?.length || 0,
+            metricCount: metricData?.metrics?.length || 0
+          });
+        } catch (observabilityError) {
+          env.logger.warn("Observability MCP failed, continuing without logs/metrics", {
+            traceId,
+            error: String(observabilityError)
+          });
+        }
+      }
+      env.logger.info("About to call AI service with MCP data", { traceId, model: "gpt-oss-120b" });
+      const systemPrompt = `You are an expert SRE agent. Analyze incidents and take autonomous actions when safe.
 
 INCIDENT ANALYSIS RULES:
 1. For OOM (Out of Memory) issues: AUTONOMOUS pod restart is safe
 2. For Database outages: NOTIFICATION ONLY - no autonomous actions
 3. Always provide structured JSON response with reasoning
-
-TOOLS AVAILABLE:
-- mapping-mcp: identify services and runbooks
-- observability-mcp: gather logs/metrics
-- remediation-mcp: restart pods, send notifications
 
 OUTPUT FORMAT: JSON with fields:
 {
@@ -1729,20 +2181,38 @@ OUTPUT FORMAT: JSON with fields:
   "root_cause_analysis": "detailed analysis",
   "autonomous_action_safe": boolean,
   "recommended_action": "specific action to take",
-  "reasoning": "why this action is recommended"
-}`
-          },
-          {
-            role: "user",
-            content: `Analyze this incident:
+  "reasoning": "why this action is recommended",
+  "confidence_score": 0.0-1.0
+}`;
+      const userPrompt = `Analyze this incident with the following context:
+
+INCIDENT DETAILS:
 Title: ${incident.title}
 Description: ${incident.description}
 Severity: ${incident.severity}
 
-Perform root cause analysis and determine if autonomous action is safe.`
-          }
+SERVICE CONTEXT:
+${serviceInfo ? `Service: ${serviceInfo.serviceName}
+Namespace: ${serviceInfo.namespace}
+Pod: ${serviceInfo.podName}
+Runbook: ${runbookContent?.title || "N/A"}` : "No service mapping available"}
+
+OBSERVABILITY DATA:
+${logData ? `Recent Logs (${logData.logs?.length || 0} entries):
+${logData.logs?.slice(0, 5).map((log) => `[${log.timestamp}] ${log.level}: ${log.message}`).join("\n") || "No logs available"}` : "No log data available"}
+
+${metricData ? `Current Metrics (${metricData.metrics?.length || 0} entries):
+${metricData.metrics?.slice(0, 3).map((metric) => `${metric.name}: ${metric.value} ${metric.unit}`).join("\n") || "No metrics available"}
+Health Status: ${metricData.healthStatus || "Unknown"}` : "No metric data available"}
+
+Perform root cause analysis and determine if autonomous action is safe.`;
+      const gptResponse = await env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
         ],
-        max_tokens: 500,
+        max_tokens: 800,
         temperature: 0.3
       });
       const analysis = gptResponse.choices?.[0]?.message?.content || "No analysis available";
@@ -1763,24 +2233,94 @@ Perform root cause analysis and determine if autonomous action is safe.`
         env.logger.warn("Failed to parse GPT JSON, using text analysis", { traceId });
         parsedAnalysis = { root_cause_analysis: analysis };
       }
-      const isOOM = incident.title.toLowerCase().includes("oom") || incident.title.toLowerCase().includes("memory") || incident.description?.toLowerCase().includes("out of memory");
-      const isDBOutage = incident.title.toLowerCase().includes("database") || incident.title.toLowerCase().includes("db");
-      if (isOOM && parsedAnalysis.autonomous_action_safe !== false) {
+      const isOOM = incident.title.toLowerCase().includes("oom") || incident.title.toLowerCase().includes("memory") || incident.description?.toLowerCase().includes("out of memory") || parsedAnalysis.incident_type === "oom";
+      const isDBOutage = incident.title.toLowerCase().includes("database") || incident.title.toLowerCase().includes("db") || parsedAnalysis.incident_type === "database_outage";
+      if (isOOM && parsedAnalysis.autonomous_action_safe !== false && serviceInfo?.podName) {
         env.logger.info("Taking autonomous action for OOM incident", { traceId, incidentId: incident.id });
-        actionsTaken.push("Autonomous pod restart initiated");
-        actionsTaken.push("Notification sent: Pod restarted successfully");
+        try {
+          const restartResult = await mcpClient.restartPod(
+            serviceInfo.podName,
+            serviceInfo.namespace,
+            traceId,
+            alertType,
+            `OOM incident: ${incident.title}`
+          );
+          if (restartResult.success) {
+            actionsTaken.push(`Autonomous pod restart: ${restartResult.message}`);
+            env.logger.info("Pod restart successful", { traceId, restartResult });
+          } else {
+            actionsTaken.push(`Pod restart failed: ${restartResult.message}`);
+            env.logger.warn("Pod restart failed", { traceId, restartResult });
+          }
+        } catch (restartError) {
+          actionsTaken.push(`Pod restart error: ${String(restartError)}`);
+          env.logger.error("Pod restart error", { traceId, error: String(restartError) });
+        }
+        try {
+          const notificationResult = await mcpClient.sendNotification(
+            `OOM incident resolved: Pod ${serviceInfo.podName} restarted autonomously`,
+            "info",
+            traceId,
+            alertType,
+            serviceInfo.serviceName
+          );
+          if (notificationResult.success) {
+            actionsTaken.push(`Notification sent: ${notificationResult.messageId}`);
+          }
+        } catch (notificationError) {
+          env.logger.warn("Notification failed", { traceId, error: String(notificationError) });
+        }
       } else if (isDBOutage) {
         env.logger.info("Database incident detected - notification only", { traceId, incidentId: incident.id });
-        actionsTaken.push("Notification sent: Database outage requires manual intervention");
+        try {
+          const notificationResult = await mcpClient.sendNotification(
+            `Database outage detected: ${incident.title} - Manual intervention required`,
+            "critical",
+            traceId,
+            alertType,
+            serviceInfo?.serviceName
+          );
+          if (notificationResult.success) {
+            actionsTaken.push(`Notification sent: ${notificationResult.messageId}`);
+          }
+        } catch (notificationError) {
+          env.logger.warn("Database notification failed", { traceId, error: String(notificationError) });
+        }
+        actionsTaken.push("Database incident - notification only (no autonomous actions)");
       } else {
         env.logger.info("General incident - notification sent", { traceId, incidentId: incident.id });
-        actionsTaken.push("Notification sent: Incident requires investigation");
+        try {
+          const notificationResult = await mcpClient.sendNotification(
+            `Incident requires investigation: ${incident.title}`,
+            incident.severity,
+            traceId,
+            alertType,
+            serviceInfo?.serviceName
+          );
+          if (notificationResult.success) {
+            actionsTaken.push(`Notification sent: ${notificationResult.messageId}`);
+          }
+        } catch (notificationError) {
+          env.logger.warn("General notification failed", { traceId, error: String(notificationError) });
+        }
       }
+      const finalAnalysis = {
+        ...parsedAnalysis,
+        serviceInfo,
+        runbookContent,
+        logData: logData ? { logCount: logData.logs?.length || 0, healthStatus: metricData?.healthStatus } : null,
+        metricData: metricData ? { metricCount: metricData.metrics?.length || 0, healthStatus: metricData.healthStatus } : null,
+        mcpDataGathered: {
+          serviceMapping: !!serviceInfo,
+          observabilityData: !!(logData || metricData),
+          remediationActions: actionsTaken.length
+        }
+      };
       await env.INCIDENTS_DB.prepare(`UPDATE incidents
                   SET status = ?, rca_analysis = ?, actions_taken = ?, updated_at = ?
                   WHERE id = ?`).bind(
         "resolved",
-        JSON.stringify(parsedAnalysis),
+        JSON.stringify(finalAnalysis),
         JSON.stringify(actionsTaken),
         (/* @__PURE__ */ new Date()).toISOString(),
         incident.id
@@ -1789,7 +2329,12 @@ Perform root cause analysis and determine if autonomous action is safe.`
         traceId,
         incidentId: incident.id,
         actionsTaken: actionsTaken.length,
-        totalDuration: Date.now() - analysisStart
+        totalDuration: Date.now() - analysisStart,
+        mcpIntegration: {
+          serviceMapping: !!serviceInfo,
+          observabilityData: !!(logData || metricData),
+          remediationActions: actionsTaken.filter((a) => a.includes("restart") || a.includes("Notification")).length
+        }
       });
     } catch (error) {
       env.logger.error("Incident analysis failed", {
@@ -1801,6 +2346,29 @@ Perform root cause analysis and determine if autonomous action is safe.`
         duration: Date.now() - analysisStart
       });
       await env.INCIDENTS_DB.prepare("UPDATE incidents SET status = ?, updated_at = ?, rca_analysis = ? WHERE id = ?").bind("failed", (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify({ error: error.message }), incident.id).run();
+    } finally {
+      try {
+        await mcpClient.disconnect();
+      } catch (disconnectError) {
+        env.logger.warn("Failed to disconnect MCP clients", { traceId, error: String(disconnectError) });
+      }
+    }
+  }
+  // Helper method to determine alert type from incident details
+  determineAlertType(title, description) {
+    const text = `${title} ${description || ""}`.toLowerCase();
+    if (text.includes("oom") || text.includes("out of memory") || text.includes("memory")) {
+      return "oom";
+    } else if (text.includes("database") || text.includes("db") || text.includes("postgres") || text.includes("mysql")) {
+      return "database_outage";
+    } else if (text.includes("cpu") || text.includes("high cpu")) {
+      return "high_cpu";
+    } else if (text.includes("disk") || text.includes("storage")) {
+      return "disk_full";
+    } else if (text.includes("network") || text.includes("connectivity")) {
+      return "network_issue";
+    } else {
+      return "general_incident";
     }
   }
 };

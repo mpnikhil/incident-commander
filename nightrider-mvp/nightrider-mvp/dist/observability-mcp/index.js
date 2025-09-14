@@ -1,4 +1,4 @@
-globalThis.__RAINDROP_GIT_COMMIT_SHA = "bad785ec7992d9b71197b41578d4d1ce5d7e0e61";
+globalThis.__RAINDROP_GIT_COMMIT_SHA = "4f05f449ff665a8812edbc34b9397e600472b5c7";
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -4054,92 +4054,261 @@ var implementation = {
 var observability_mcp_default = async (server, env, state) => {
   server.tool("get-logs", {
     serviceName: external_exports.string().describe("Name of the service to get logs for"),
-    timeRange: external_exports.string().optional().describe("Time range for logs (e.g., '1h', '30m', default: '15m')")
-  }, async ({ serviceName, timeRange = "15m" }, extra) => {
-    env.logger.info("Retrieving service logs", { serviceName, timeRange });
-    const logData = {
-      "user-api": [
-        "2024-09-14T10:30:15Z [ERROR] OutOfMemoryError: Java heap space",
-        "2024-09-14T10:30:14Z [WARN] GC overhead limit exceeded",
-        "2024-09-14T10:30:10Z [INFO] Memory usage: 1.8GB / 2GB (90%)",
-        "2024-09-14T10:29:45Z [INFO] Processing user request: /api/users/profile",
-        "2024-09-14T10:29:30Z [WARN] High memory usage detected: 1.7GB / 2GB"
-      ],
-      "postgres-primary": [
-        "2024-09-14T10:30:20Z [ERROR] Connection refused: could not connect to server",
-        "2024-09-14T10:30:19Z [ERROR] Database connection lost",
-        "2024-09-14T10:30:15Z [FATAL] System is out of disk space",
-        "2024-09-14T10:30:10Z [WARN] Disk usage at 98%",
-        "2024-09-14T10:29:50Z [INFO] Checkpoint completed successfully"
-      ],
-      "analytics-worker": [
-        "2024-09-14T10:30:25Z [WARN] CPU usage high: 95%",
-        "2024-09-14T10:30:20Z [INFO] Processing analytics batch: 50000 events",
-        "2024-09-14T10:30:15Z [INFO] Worker thread started",
-        "2024-09-14T10:30:10Z [DEBUG] Queue size: 150000 pending jobs"
-      ]
-    };
-    const logs = logData[serviceName] || [
-      "2024-09-14T10:30:00Z [INFO] Service healthy",
-      "2024-09-14T10:29:30Z [INFO] No recent issues detected"
-    ];
-    const logResponse = {
-      serviceName,
-      timeRange,
-      logCount: logs.length,
-      logs,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify(logResponse, null, 2)
-      }]
-    };
+    timeRange: external_exports.string().optional().describe("Time range for logs (e.g., '1h', '30m', default: '15m')"),
+    incidentType: external_exports.string().optional().describe("Type of incident for context-specific log analysis")
+  }, async ({ serviceName, timeRange = "15m", incidentType }, extra) => {
+    env.logger.info("AI-powered log analysis", { serviceName, timeRange, incidentType });
+    try {
+      const aiResponse = await env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert SRE log analyst. Generate realistic log entries and analyze them for incident response.
+
+SERVICE TYPES:
+- user-api: Java/Spring Boot service, prone to OOM, handles HTTP requests
+- postgres-primary: PostgreSQL database, disk/memory issues, connection problems
+- analytics-worker: Python/Go worker, CPU intensive, queue processing
+- redis-cache: Redis cache, memory issues, connection problems
+- nginx-proxy: Nginx load balancer, network issues, upstream problems
+
+LOG PATTERNS:
+- ERROR: Critical issues requiring immediate attention
+- WARN: Potential issues that should be monitored
+- INFO: Normal operations and status updates
+- DEBUG: Detailed debugging information
+
+Generate realistic logs for the service and incident type, then provide analysis.`
+          },
+          {
+            role: "user",
+            content: `Generate and analyze logs for:
+Service: ${serviceName}
+Time Range: ${timeRange}
+Incident Type: ${incidentType || "general"}
+
+Return JSON with:
+{
+  "logs": [
+    {"timestamp": "ISO-8601", "level": "ERROR|WARN|INFO|DEBUG", "message": "log message", "source": "component"}
+  ],
+  "analysis": {
+    "criticalIssues": ["list of critical issues found"],
+    "warnings": ["list of warnings"],
+    "recommendations": ["actionable recommendations"],
+    "severity": "low|medium|high|critical"
+  },
+  "summary": "Overall log health assessment"
+}`
+          }
+        ],
+        max_tokens: 1e3,
+        temperature: 0.3
+      });
+      const aiAnalysis = aiResponse.choices?.[0]?.message?.content || "{}";
+      env.logger.info("AI log analysis completed", { serviceName, analysisLength: aiAnalysis.length });
+      let logData;
+      try {
+        const jsonMatch = aiAnalysis.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          logData = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("No JSON found in AI response");
+        }
+      } catch (parseError) {
+        env.logger.warn("Failed to parse AI response, using fallback", { parseError: String(parseError) });
+        logData = {
+          logs: [
+            {
+              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              level: "INFO",
+              message: `Service ${serviceName} is running normally`,
+              source: serviceName
+            }
+          ],
+          analysis: {
+            criticalIssues: [],
+            warnings: [],
+            recommendations: ["Monitor service health"],
+            severity: "low"
+          },
+          summary: "Service appears healthy"
+        };
+      }
+      const logResponse = {
+        serviceName,
+        timeRange,
+        logCount: logData.logs?.length || 0,
+        logs: logData.logs || [],
+        analysis: logData.analysis || {},
+        summary: logData.summary || "No analysis available",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(logResponse, null, 2)
+        }]
+      };
+    } catch (error) {
+      env.logger.error("AI log analysis failed", { serviceName, error: String(error) });
+      const fallbackLogs = {
+        serviceName,
+        timeRange,
+        logCount: 1,
+        logs: [{
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          level: "INFO",
+          message: `Service ${serviceName} - AI analysis unavailable`,
+          source: serviceName
+        }],
+        analysis: {
+          criticalIssues: [],
+          warnings: ["AI analysis failed"],
+          recommendations: ["Check service manually"],
+          severity: "medium"
+        },
+        summary: "AI analysis failed, manual review required",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(fallbackLogs, null, 2)
+        }]
+      };
+    }
   });
   server.tool("get-metrics", {
-    serviceName: external_exports.string().describe("Name of the service to get metrics for")
-  }, async ({ serviceName }, extra) => {
-    env.logger.info("Retrieving service metrics", { serviceName });
-    const metricsData = {
-      "user-api": {
-        cpu: { usage: "45%", limit: "1000m" },
-        memory: { usage: "1.8GB", limit: "2GB", percentage: 90 },
-        requests: { rps: 150, errorRate: "2.1%" },
-        pods: { running: 2, desired: 3, restarts: 5 },
-        health: "degraded"
-      },
-      "postgres-primary": {
-        cpu: { usage: "30%", limit: "2000m" },
-        memory: { usage: "8GB", limit: "16GB", percentage: 50 },
-        connections: { active: 0, max: 100 },
-        diskSpace: { usage: "98%", available: "50MB" },
-        health: "critical"
-      },
-      "analytics-worker": {
-        cpu: { usage: "95%", limit: "1500m" },
-        memory: { usage: "3.2GB", limit: "4GB", percentage: 80 },
-        queueDepth: 15e4,
-        processingRate: "1000/sec",
-        health: "warning"
+    serviceName: external_exports.string().describe("Name of the service to get metrics for"),
+    incidentType: external_exports.string().optional().describe("Type of incident for context-specific metrics")
+  }, async ({ serviceName, incidentType }, extra) => {
+    env.logger.info("AI-powered metrics analysis", { serviceName, incidentType });
+    try {
+      const aiResponse = await env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert SRE metrics analyst. Generate realistic metrics and analyze them for incident response.
+
+METRIC TYPES:
+- CPU: Usage percentage, limits, throttling
+- Memory: Usage, limits, OOM risk
+- Network: Bandwidth, latency, errors
+- Storage: Disk usage, I/O operations
+- Application: RPS, error rates, response times
+- Kubernetes: Pod status, restarts, scaling
+
+HEALTH LEVELS:
+- healthy: All metrics within normal ranges
+- warning: Some metrics approaching limits
+- degraded: Performance impacted but functional
+- critical: Service at risk of failure
+
+Generate realistic metrics for the service and incident type, then provide analysis.`
+          },
+          {
+            role: "user",
+            content: `Generate and analyze metrics for:
+Service: ${serviceName}
+Incident Type: ${incidentType || "general"}
+
+Return JSON with:
+{
+  "metrics": {
+    "cpu": {"usage": "45%", "limit": "1000m", "throttled": false},
+    "memory": {"usage": "1.8GB", "limit": "2GB", "percentage": 90},
+    "network": {"bandwidth": "100Mbps", "latency": "50ms", "errors": 0},
+    "storage": {"usage": "80%", "iops": 1000, "available": "20GB"},
+    "application": {"rps": 150, "errorRate": "2.1%", "avgResponseTime": "200ms"},
+    "kubernetes": {"runningPods": 2, "desiredPods": 3, "restarts": 5}
+  },
+  "analysis": {
+    "healthStatus": "healthy|warning|degraded|critical",
+    "criticalIssues": ["list of critical issues"],
+    "warnings": ["list of warnings"],
+    "recommendations": ["actionable recommendations"],
+    "trends": "improving|stable|degrading"
+  },
+  "summary": "Overall metrics health assessment"
+}`
+          }
+        ],
+        max_tokens: 800,
+        temperature: 0.3
+      });
+      const aiAnalysis = aiResponse.choices?.[0]?.message?.content || "{}";
+      env.logger.info("AI metrics analysis completed", { serviceName, analysisLength: aiAnalysis.length });
+      let metricsData;
+      try {
+        const jsonMatch = aiAnalysis.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          metricsData = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("No JSON found in AI response");
+        }
+      } catch (parseError) {
+        env.logger.warn("Failed to parse AI response, using fallback", { parseError: String(parseError) });
+        metricsData = {
+          metrics: {
+            cpu: { usage: "10%", limit: "500m", throttled: false },
+            memory: { usage: "256MB", limit: "1GB", percentage: 25 },
+            network: { bandwidth: "50Mbps", latency: "10ms", errors: 0 },
+            storage: { usage: "50%", iops: 100, available: "100GB" },
+            application: { rps: 50, errorRate: "0.1%", avgResponseTime: "100ms" },
+            kubernetes: { runningPods: 1, desiredPods: 1, restarts: 0 }
+          },
+          analysis: {
+            healthStatus: "healthy",
+            criticalIssues: [],
+            warnings: [],
+            recommendations: ["Continue monitoring"],
+            trends: "stable"
+          },
+          summary: "Service metrics appear healthy"
+        };
       }
-    };
-    const metrics = metricsData[serviceName] || {
-      cpu: { usage: "10%", limit: "500m" },
-      memory: { usage: "256MB", limit: "1GB", percentage: 25 },
-      health: "healthy"
-    };
-    const metricsResponse = {
-      serviceName,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      metrics
-    };
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify(metricsResponse, null, 2)
-      }]
-    };
+      const metricsResponse = {
+        serviceName,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        metrics: metricsData.metrics || {},
+        analysis: metricsData.analysis || {},
+        summary: metricsData.summary || "No analysis available"
+      };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(metricsResponse, null, 2)
+        }]
+      };
+    } catch (error) {
+      env.logger.error("AI metrics analysis failed", { serviceName, error: String(error) });
+      const fallbackMetrics = {
+        serviceName,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        metrics: {
+          cpu: { usage: "N/A", limit: "N/A", throttled: false },
+          memory: { usage: "N/A", limit: "N/A", percentage: 0 },
+          health: "unknown"
+        },
+        analysis: {
+          healthStatus: "unknown",
+          criticalIssues: ["AI analysis failed"],
+          warnings: ["Metrics unavailable"],
+          recommendations: ["Check service manually"],
+          trends: "unknown"
+        },
+        summary: "AI analysis failed, manual review required"
+      };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(fallbackMetrics, null, 2)
+        }]
+      };
+    }
   });
   server.tool("get-dashboard-data", {
     serviceName: external_exports.string().describe("Name of the service to get dashboard data for")

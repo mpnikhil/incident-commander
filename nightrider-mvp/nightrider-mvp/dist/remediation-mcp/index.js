@@ -1,4 +1,4 @@
-globalThis.__RAINDROP_GIT_COMMIT_SHA = "bad785ec7992d9b71197b41578d4d1ce5d7e0e61";
+globalThis.__RAINDROP_GIT_COMMIT_SHA = "4f05f449ff665a8812edbc34b9397e600472b5c7";
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -4054,65 +4054,287 @@ var implementation = {
 var remediation_mcp_default = async (server, env, state) => {
   server.tool("restart-pod", {
     podName: external_exports.string().describe("Name of the pod to restart"),
-    namespace: external_exports.string().optional().describe("Kubernetes namespace (default: production)")
-  }, async ({ podName, namespace = "production" }, extra) => {
-    env.logger.info("Restarting pod", { podName, namespace });
-    const restartResult = {
-      action: "pod_restart",
-      podName,
-      namespace,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      status: "success",
-      details: {
-        previousState: "OOMKilled",
-        newState: "Running",
-        restartCount: 6,
-        timeToReady: "45s"
-      },
-      commands: [
-        `kubectl delete pod ${podName} -n ${namespace}`,
-        `kubectl wait --for=condition=Ready pod -l app=${podName.split("-")[0]} -n ${namespace}`
-      ]
-    };
-    await new Promise((resolve) => setTimeout(resolve, 1e3));
-    env.logger.info("Pod restart completed", { podName, status: "success" });
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify(restartResult, null, 2)
-      }]
-    };
+    namespace: external_exports.string().optional().describe("Kubernetes namespace (default: production)"),
+    incidentType: external_exports.string().optional().describe("Type of incident for context"),
+    reason: external_exports.string().optional().describe("Reason for restart")
+  }, async ({ podName, namespace = "production", incidentType, reason }, extra) => {
+    env.logger.info("AI-powered pod restart decision", { podName, namespace, incidentType, reason });
+    try {
+      const aiResponse = await env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert SRE remediation agent. Decide whether pod restarts are safe and appropriate.
+
+SAFETY RULES:
+- OOM/Memory issues: SAFE to restart (stateless services)
+- Database services: NOT SAFE (data loss risk)
+- Stateful services: NOT SAFE (data loss risk)
+- Load balancers: CAUTION (service disruption)
+- Monitoring services: CAUTION (observability loss)
+
+POD TYPES:
+- user-api: Stateless, SAFE to restart
+- postgres-primary: Stateful database, NOT SAFE
+- redis-cache: Stateful cache, NOT SAFE
+- nginx-proxy: Load balancer, CAUTION
+- analytics-worker: Stateless, SAFE to restart
+
+Return JSON with decision and reasoning.`
+          },
+          {
+            role: "user",
+            content: `Should I restart this pod?
+Pod: ${podName}
+Namespace: ${namespace}
+Incident Type: ${incidentType || "unknown"}
+Reason: ${reason || "No reason provided"}
+
+Return JSON with:
+{
+  "safeToRestart": true|false,
+  "confidence": 0.0-1.0,
+  "reasoning": "detailed explanation",
+  "risks": ["list of potential risks"],
+  "alternatives": ["alternative actions if not safe"],
+  "recommendedAction": "restart|investigate|escalate"
+}`
+          }
+        ],
+        max_tokens: 400,
+        temperature: 0.2
+      });
+      const aiDecision = aiResponse.choices?.[0]?.message?.content || "{}";
+      env.logger.info("AI restart decision completed", { podName, decision: aiDecision });
+      let decision;
+      try {
+        const jsonMatch = aiDecision.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          decision = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("No JSON found in AI response");
+        }
+      } catch (parseError) {
+        env.logger.warn("Failed to parse AI response, using conservative approach", { parseError: String(parseError) });
+        decision = {
+          safeToRestart: false,
+          confidence: 0.1,
+          reasoning: "AI parsing failed, using conservative approach",
+          risks: ["Unknown safety implications"],
+          alternatives: ["Investigate further"],
+          recommendedAction: "investigate"
+        };
+      }
+      if (decision.safeToRestart && decision.confidence > 0.7) {
+        env.logger.info("AI approved pod restart", { podName, confidence: decision.confidence });
+        const restartResult = {
+          action: "pod_restart",
+          podName,
+          namespace,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          status: "success",
+          aiDecision: decision,
+          details: {
+            previousState: "OOMKilled",
+            newState: "Running",
+            restartCount: 6,
+            timeToReady: "45s",
+            confidence: decision.confidence
+          },
+          commands: [
+            `kubectl delete pod ${podName} -n ${namespace}`,
+            `kubectl wait --for=condition=Ready pod -l app=${podName.split("-")[0]} -n ${namespace}`
+          ]
+        };
+        await new Promise((resolve) => setTimeout(resolve, 1e3));
+        env.logger.info("Pod restart completed successfully", { podName, status: "success" });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(restartResult, null, 2)
+          }]
+        };
+      } else {
+        env.logger.warn("AI rejected pod restart", { podName, reasoning: decision.reasoning });
+        const rejectionResult = {
+          action: "pod_restart",
+          podName,
+          namespace,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          status: "rejected",
+          aiDecision: decision,
+          details: {
+            reason: "AI determined restart is not safe",
+            confidence: decision.confidence,
+            risks: decision.risks,
+            alternatives: decision.alternatives
+          },
+          recommendedAction: decision.recommendedAction
+        };
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(rejectionResult, null, 2)
+          }]
+        };
+      }
+    } catch (error) {
+      env.logger.error("AI restart decision failed", { podName, error: String(error) });
+      const errorResult = {
+        action: "pod_restart",
+        podName,
+        namespace,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        status: "error",
+        details: {
+          reason: "AI decision making failed",
+          error: String(error),
+          recommendation: "Manual review required"
+        }
+      };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(errorResult, null, 2)
+        }]
+      };
+    }
   });
   server.tool("send-notification", {
     message: external_exports.string().describe("Notification message content"),
     severity: external_exports.string().optional().describe("Incident severity (low/medium/high/critical)"),
-    channel: external_exports.string().optional().describe("Notification channel (email/slack/pagerduty)")
-  }, async ({ message, severity = "medium", channel = "email" }, extra) => {
-    env.logger.info("Sending notification", { message, severity, channel });
-    const notificationResult = {
-      action: "send_notification",
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      status: "delivered",
-      details: {
-        message,
-        severity,
-        channel,
-        recipients: [
-          "oncall-sre@company.com",
-          "#incidents-channel"
+    channel: external_exports.string().optional().describe("Notification channel (email/slack/pagerduty)"),
+    incidentType: external_exports.string().optional().describe("Type of incident for context"),
+    serviceName: external_exports.string().optional().describe("Affected service name")
+  }, async ({ message, severity = "medium", channel = "email", incidentType, serviceName }, extra) => {
+    env.logger.info("AI-powered notification generation", { message, severity, channel, incidentType, serviceName });
+    try {
+      const aiResponse = await env.AI.run("gpt-oss-120b", {
+        model: "gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert SRE communication agent. Generate clear, actionable incident notifications.
+
+NOTIFICATION GUIDELINES:
+- Be concise but informative
+- Include key details: service, impact, status
+- Provide next steps or actions taken
+- Use appropriate tone for severity level
+- Include relevant technical details
+
+SEVERITY LEVELS:
+- low: Informational, minor impact
+- medium: Moderate impact, monitoring required
+- high: Significant impact, immediate attention
+- critical: Severe impact, emergency response
+
+CHANNEL ADAPTATIONS:
+- email: Formal, detailed, full context
+- slack: Concise, emoji, quick updates
+- pagerduty: Urgent, action-oriented, escalation info`
+          },
+          {
+            role: "user",
+            content: `Generate an enhanced notification:
+Original Message: ${message}
+Severity: ${severity}
+Channel: ${channel}
+Incident Type: ${incidentType || "unknown"}
+Service: ${serviceName || "unknown"}
+
+Return JSON with:
+{
+  "enhancedMessage": "improved notification content",
+  "recipients": ["list of appropriate recipients"],
+  "urgency": "low|medium|high|critical",
+  "nextSteps": ["immediate actions to take"],
+  "escalation": "when to escalate",
+  "technicalDetails": "relevant technical info"
+}`
+          }
         ],
-        messageId: `notif-${crypto.randomUUID()}`,
-        deliveryTime: "2.3s"
+        max_tokens: 500,
+        temperature: 0.3
+      });
+      const aiNotification = aiResponse.choices?.[0]?.message?.content || "{}";
+      env.logger.info("AI notification generation completed", { severity, contentLength: aiNotification.length });
+      let notificationData;
+      try {
+        const jsonMatch = aiNotification.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          notificationData = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("No JSON found in AI response");
+        }
+      } catch (parseError) {
+        env.logger.warn("Failed to parse AI response, using original message", { parseError: String(parseError) });
+        notificationData = {
+          enhancedMessage: message,
+          recipients: ["oncall-sre@company.com"],
+          urgency: severity,
+          nextSteps: ["Monitor the situation"],
+          escalation: "If issue persists for 15 minutes",
+          technicalDetails: "No additional details available"
+        };
       }
-    };
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    env.logger.info("Notification sent successfully", { severity, recipients: notificationResult.details.recipients.length });
-    return {
-      content: [{
-        type: "text",
-        text: JSON.stringify(notificationResult, null, 2)
-      }]
-    };
+      const recipients = severity === "critical" ? ["oncall-sre@company.com", "senior-sre@company.com", "#incidents-critical"] : severity === "high" ? ["oncall-sre@company.com", "#incidents-channel"] : ["oncall-sre@company.com"];
+      const notificationResult = {
+        action: "send_notification",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        status: "delivered",
+        aiEnhanced: true,
+        details: {
+          originalMessage: message,
+          enhancedMessage: notificationData.enhancedMessage || message,
+          severity,
+          channel,
+          recipients: notificationData.recipients || recipients,
+          messageId: `notif-${crypto.randomUUID()}`,
+          deliveryTime: "2.3s",
+          urgency: notificationData.urgency || severity,
+          nextSteps: notificationData.nextSteps || [],
+          escalation: notificationData.escalation || "Standard escalation procedures",
+          technicalDetails: notificationData.technicalDetails || "No additional details"
+        }
+      };
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      env.logger.info("AI-enhanced notification sent successfully", {
+        severity,
+        recipients: notificationResult.details.recipients.length,
+        enhanced: true
+      });
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(notificationResult, null, 2)
+        }]
+      };
+    } catch (error) {
+      env.logger.error("AI notification generation failed", { message, severity, error: String(error) });
+      const fallbackResult = {
+        action: "send_notification",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        status: "delivered",
+        aiEnhanced: false,
+        details: {
+          message,
+          severity,
+          channel,
+          recipients: ["oncall-sre@company.com"],
+          messageId: `notif-${crypto.randomUUID()}`,
+          deliveryTime: "2.3s",
+          note: "AI enhancement failed, using original message"
+        }
+      };
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(fallbackResult, null, 2)
+        }]
+      };
+    }
   });
   server.tool("scale-service", {
     serviceName: external_exports.string().describe("Name of the service to scale"),

@@ -14,112 +14,212 @@ export default async (server: McpServer, env: Env, state: ActorState) => {
     };
   });
 
-  // Tool: Map alert type to service information
+  // Tool: Map alert type to service information using AI
   server.tool("map-alert-to-service", {
-    alertType: z.string().describe("Type of alert (e.g., 'oom', 'database_outage', 'high_cpu')")
-  }, async ({ alertType }, extra) => {
-      env.logger.info('Mapping alert to service', { alertType });
+    alertType: z.string().describe("Type of alert (e.g., 'oom', 'database_outage', 'high_cpu')"),
+    incidentTitle: z.string().optional().describe("Incident title for additional context"),
+    incidentDescription: z.string().optional().describe("Incident description for additional context")
+  }, async ({ alertType, incidentTitle, incidentDescription }, extra) => {
+      env.logger.info('AI-powered service mapping', { alertType, incidentTitle });
 
-      // Simulated service mapping logic
-      const serviceMapping: Record<string, any> = {
-        'oom': {
-          serviceName: 'user-api',
-          namespace: 'production',
-          podName: 'user-api-deployment-abc123',
-          runbookId: 'oom-recovery-runbook'
-        },
-        'database_outage': {
-          serviceName: 'postgres-primary',
-          namespace: 'database',
-          podName: 'postgres-primary-0',
-          runbookId: 'database-outage-runbook'
-        },
-        'high_cpu': {
-          serviceName: 'analytics-worker',
-          namespace: 'production',
-          podName: 'analytics-worker-xyz789',
-          runbookId: 'high-cpu-runbook'
+      try {
+        // Use AI to intelligently map alerts to services
+        const aiResponse = await env.AI.run('gpt-oss-120b', {
+          model: 'gpt-oss-120b',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert SRE service mapping agent. Based on alert types and incident details, map them to the most likely affected services.
+
+SERVICE INVENTORY:
+- user-api: Frontend API service, handles user requests, prone to OOM issues
+- postgres-primary: Primary database, critical infrastructure
+- analytics-worker: Background processing service, CPU intensive
+- redis-cache: Caching layer, memory intensive
+- nginx-proxy: Load balancer, network issues
+- monitoring-stack: Observability services
+
+MAPPING RULES:
+- OOM/Memory issues → user-api, redis-cache (memory-intensive services)
+- Database issues → postgres-primary
+- High CPU → analytics-worker, monitoring-stack
+- Network issues → nginx-proxy, user-api
+- Cache issues → redis-cache
+
+Return JSON with:
+{
+  "serviceName": "most-likely-service",
+  "namespace": "production|database|cache",
+  "podName": "realistic-pod-name",
+  "runbookId": "service-specific-runbook",
+  "confidence": 0.0-1.0,
+  "reasoning": "why this service was selected"
+}`
+            },
+            {
+              role: 'user',
+              content: `Map this alert to a service:
+Alert Type: ${alertType}
+Title: ${incidentTitle || 'N/A'}
+Description: ${incidentDescription || 'N/A'}
+
+Provide the most likely affected service with reasoning.`
+            }
+          ],
+          max_tokens: 300,
+          temperature: 0.3
+        });
+
+        const aiAnalysis = aiResponse.choices?.[0]?.message?.content || '{}';
+        env.logger.info('AI service mapping completed', { alertType, aiAnalysis });
+
+        // Parse AI response
+        let serviceInfo;
+        try {
+          const jsonMatch = aiAnalysis.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            serviceInfo = JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error('No JSON found in AI response');
+          }
+        } catch (parseError) {
+          env.logger.warn('Failed to parse AI response, using fallback', { parseError: String(parseError) });
+          // Fallback to basic mapping
+          serviceInfo = {
+            serviceName: alertType.includes('database') ? 'postgres-primary' : 
+                        alertType.includes('oom') ? 'user-api' : 'analytics-worker',
+            namespace: 'production',
+            podName: `${alertType}-service-pod-${Math.random().toString(36).substr(2, 9)}`,
+            runbookId: `${alertType}-runbook`,
+            confidence: 0.5,
+            reasoning: 'Fallback mapping due to AI parsing error'
+          };
         }
-      };
 
-      const serviceInfo = serviceMapping[alertType.toLowerCase()] || {
-        serviceName: 'unknown-service',
-        namespace: 'production',
-        podName: 'unknown-pod',
-        runbookId: 'general-incident-runbook'
-      };
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(serviceInfo, null, 2)
+          }]
+        };
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(serviceInfo, null, 2)
-        }]
-      };
+      } catch (error) {
+        env.logger.error('AI service mapping failed', { alertType, error: String(error) });
+        
+        // Fallback to basic mapping
+        const fallbackMapping = {
+          serviceName: 'unknown-service',
+          namespace: 'production',
+          podName: 'unknown-pod',
+          runbookId: 'general-incident-runbook',
+          confidence: 0.1,
+          reasoning: 'AI mapping failed, using fallback'
+        };
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(fallbackMapping, null, 2)
+          }]
+        };
+      }
     });
 
-  // Tool: Get runbook content for a service
+  // Tool: Get runbook content for a service using AI
   server.tool("get-runbook", {
-    serviceName: z.string().describe("Name of the service or runbook ID")
-  }, async ({ serviceName }, extra) => {
-      env.logger.info('Retrieving runbook', { serviceName });
+    serviceName: z.string().describe("Name of the service or runbook ID"),
+    incidentType: z.string().optional().describe("Type of incident for context-specific runbook")
+  }, async ({ serviceName, incidentType }, extra) => {
+      env.logger.info('AI-powered runbook generation', { serviceName, incidentType });
 
-      // Simulated runbook content
-      const runbooks: Record<string, string> = {
-        'user-api': `
-# User API Incident Runbook
+      try {
+        // Use AI to generate intelligent runbook content
+        const aiResponse = await env.AI.run('gpt-oss-120b', {
+          model: 'gpt-oss-120b',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert SRE runbook generator. Create detailed, actionable runbooks for incident response.
 
-## OOM Recovery Steps:
-1. Check current memory usage: kubectl top pod user-api-deployment-*
-2. Review memory limits in deployment.yaml
-3. Restart affected pods: kubectl delete pod user-api-deployment-*
-4. Monitor for 5 minutes post-restart
-5. If issue persists, scale up replicas or increase memory limits
+RUNBOOK STRUCTURE:
+1. Service Overview
+2. Common Issues & Symptoms
+3. Diagnostic Steps
+4. Recovery Procedures
+5. Safety Guidelines
+6. Escalation Procedures
 
-## Safe Actions:
-- Pod restart: SAFE (automatic recovery)
-- Memory limit increase: REQUIRES APPROVAL
-        `,
-        'postgres-primary': `
-# Database Outage Runbook
+SAFETY RULES:
+- Pod restarts: SAFE for stateless services
+- Database operations: REQUIRES MANUAL APPROVAL
+- Memory/CPU scaling: REQUIRES APPROVAL
+- Network changes: REQUIRES APPROVAL
+- Configuration changes: REQUIRES APPROVAL
 
-## Database Recovery Steps:
-1. Check database connection: pg_isready -h postgres-primary
-2. Review database logs for errors
-3. Check disk space and memory usage
-4. **CRITICAL**: Database restarts require manual approval
-5. Escalate to DBA team immediately
+Return a well-formatted markdown runbook with specific commands and clear safety guidelines.`
+            },
+            {
+              role: 'user',
+              content: `Generate a runbook for:
+Service: ${serviceName}
+Incident Type: ${incidentType || 'general'}
 
-## Safe Actions:
-- Connection checks: SAFE
-- Log review: SAFE
-- Database restart: REQUIRES MANUAL APPROVAL
-        `,
-        'general-incident-runbook': `
-# General Incident Response
+Create a comprehensive runbook with specific commands, safety guidelines, and escalation procedures.`
+            }
+          ],
+          max_tokens: 800,
+          temperature: 0.2
+        });
 
-## Standard Steps:
-1. Gather initial information about the incident
-2. Check service health and dependencies
-3. Review logs and metrics
-4. Determine safe vs unsafe remediation actions
-5. Take appropriate action or escalate
+        const aiRunbook = aiResponse.choices?.[0]?.message?.content || 'No runbook generated';
+        env.logger.info('AI runbook generation completed', { serviceName, runbookLength: aiRunbook.length });
 
-## Default Safe Actions:
-- Log collection: SAFE
-- Health checks: SAFE
-- Notifications: SAFE
-- Pod restarts for OOM: SAFE
-- Database operations: REQUIRES APPROVAL
-        `
-      };
+        return {
+          content: [{
+            type: "text",
+            text: aiRunbook
+          }]
+        };
 
-      const runbookContent = runbooks[serviceName] || runbooks['general-incident-runbook'];
+      } catch (error) {
+        env.logger.error('AI runbook generation failed', { serviceName, error: String(error) });
+        
+        // Fallback to basic runbook
+        const fallbackRunbook = `# ${serviceName} Incident Runbook
 
-      return {
-        content: [{
-          type: "text",
-          text: runbookContent || 'No runbook content available'
-        }]
-      };
+## Service Overview
+This is a fallback runbook for ${serviceName}.
+
+## Common Issues
+- Service unavailability
+- Performance degradation
+- Resource exhaustion
+
+## Diagnostic Steps
+1. Check service health: kubectl get pods -l app=${serviceName}
+2. Review logs: kubectl logs -l app=${serviceName} --tail=100
+3. Check resources: kubectl top pods -l app=${serviceName}
+
+## Recovery Procedures
+1. Restart pods if safe: kubectl delete pod -l app=${serviceName}
+2. Scale if needed: kubectl scale deployment ${serviceName} --replicas=2
+3. Monitor recovery: kubectl get pods -l app=${serviceName} -w
+
+## Safety Guidelines
+- Pod restarts: SAFE for stateless services
+- Scaling: REQUIRES APPROVAL
+- Configuration changes: REQUIRES APPROVAL
+
+## Escalation
+- Contact oncall team if issue persists
+- Escalate to senior SRE for complex issues`;
+
+        return {
+          content: [{
+            type: "text",
+            text: fallbackRunbook
+          }]
+        };
+      }
     });
 }
