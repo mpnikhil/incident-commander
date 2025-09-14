@@ -1,6 +1,6 @@
 // Nightrider SRE Agent Dashboard JavaScript
 
-const API_URL = 'https://svc-01k52w6389xbj4hxwt4zgpckc7.01k1v9y078eahcz45grz0g76p0.lmapp.run';
+const API_URL = 'https://svc-01k5373qvxqt2bcydgnrcngfne.01k1v9y078eahcz45grz0g76p0.lmapp.run';
 
 // Global state
 let incidents = [];
@@ -152,7 +152,7 @@ async function loadAllIncidents(updateUI = true) {
 function updateDashboardStats() {
     const total = incidents.length;
     const critical = incidents.filter(i => ['P0', 'P1'].includes(i.severity)).length;
-    const autoRemediated = incidents.filter(i => i.status === 'resolved' && i.auto_remediated).length;
+    const autoRemediated = incidents.filter(i => i.status === 'resolved' && (i.remediation_status === 'completed' || i.auto_remediated)).length;
     const avgTime = calculateAverageResponseTime();
 
     totalIncidentsEl.textContent = total;
@@ -177,7 +177,7 @@ function calculateAverageResponseTime() {
 // Load recent incidents for dashboard
 function loadRecentIncidents() {
     const recentIncidents = incidents
-        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
         .slice(0, 5);
 
     if (recentIncidents.length === 0) {
@@ -206,13 +206,13 @@ function displayIncidents(incidentsToShow) {
 function createIncidentCard(incident) {
     const severityClass = incident.severity.toLowerCase();
     const statusIcon = getStatusIcon(incident.status);
-    const timeAgo = formatTimeAgo(incident.timestamp);
+    const timeAgo = formatTimeAgo(incident.created_at);
 
     return `
         <div class="incident-card ${severityClass}" onclick="openIncidentModal('${incident.id}')">
             <div class="incident-header">
                 <div>
-                    <div class="incident-title">${incident.message}</div>
+                    <div class="incident-title">${incident.title}</div>
                     <div class="incident-meta">
                         <span class="badge ${getSeverityBadgeClass(incident.severity)}">${incident.severity}</span>
                         <span class="badge ${getStatusBadgeClass(incident.status)}">${incident.status}</span>
@@ -336,16 +336,19 @@ function displayIncidentModal(incident) {
             </div>
         `;
     } else {
+        // Incident details are now returned directly
         incidentModalTitle.textContent = `Incident ${incident.id}`;
         incidentModalBody.innerHTML = `
             <div style="margin-bottom: 2rem;">
                 <h3 style="color: #1e3c72; margin-bottom: 1rem;">Details</h3>
                 <div style="background: #f8f9fa; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-                    <p><strong>Message:</strong> ${incident.message}</p>
+                    <p><strong>Title:</strong> ${incident.title || 'N/A'}</p>
+                    <p><strong>Description:</strong> ${incident.description || 'N/A'}</p>
                     <p><strong>Severity:</strong> <span class="badge ${getSeverityBadgeClass(incident.severity)}">${incident.severity}</span></p>
                     <p><strong>Status:</strong> <span class="badge ${getStatusBadgeClass(incident.status)}">${incident.status}</span></p>
                     <p><strong>Source:</strong> ${incident.source}</p>
-                    <p><strong>Timestamp:</strong> ${new Date(incident.timestamp).toLocaleString()}</p>
+                    <p><strong>Created:</strong> ${new Date(incident.created_at).toLocaleString()}</p>
+                    <p><strong>Updated:</strong> ${new Date(incident.updated_at).toLocaleString()}</p>
                 </div>
 
                 ${incident.affected_services && incident.affected_services.length > 0 ? `
@@ -491,6 +494,7 @@ async function triggerDemoIncident(type) {
             alert_type: "database_outage",
             severity: "P0",
             message: "Primary PostgreSQL database cluster is down - all write operations failing",
+            timestamp: new Date().toISOString(),
             affected_services: ["user-service", "order-service", "payment-service"],
             metadata: {
                 cluster_id: "pg-prod-cluster-01",
@@ -505,6 +509,7 @@ async function triggerDemoIncident(type) {
             alert_type: "oom_crash",
             severity: "P2",
             message: "Pod analytics-worker-7d9f8b6c4d-x2m8n killed due to OOMKilled - memory limit exceeded",
+            timestamp: new Date().toISOString(),
             affected_services: ["analytics-service"],
             metadata: {
                 namespace: "production",
@@ -521,6 +526,7 @@ async function triggerDemoIncident(type) {
             alert_type: "disk_space_high",
             severity: "P3",
             message: "Disk usage on /var/log partition exceeded 85% threshold",
+            timestamp: new Date().toISOString(),
             affected_services: ["logging-service", "metrics-collector"],
             metadata: {
                 hostname: "app-server-03.prod",

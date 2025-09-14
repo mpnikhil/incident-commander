@@ -172,23 +172,18 @@ export default class extends Service<Env> {
       // Get incident details from controller
       const incident = await Controller.getIncidentDetails(incidentId, this.env);
 
-      // Format response using model
-      const responseData = Model.formatIncidentResponse(incident);
-
+      // Return the incident details directly
       return new Response(JSON.stringify({
-        ...responseData,
-        details: {
-          id: incident.id,
-          title: incident.title,
-          description: incident.description,
-          severity: incident.severity,
-          status: incident.status,
-          source: incident.source,
-          affected_services: incident.affected_services,
-          created_at: incident.created_at,
-          updated_at: incident.updated_at,
-          metadata: incident.metadata
-        }
+        id: incident.id,
+        title: incident.title,
+        description: incident.description,
+        severity: incident.severity,
+        status: incident.status,
+        source: incident.source,
+        affected_services: incident.affected_services,
+        created_at: incident.created_at,
+        updated_at: incident.updated_at,
+        metadata: incident.metadata
       }), {
         status: 200,
         headers: {

@@ -144,11 +144,29 @@ export async function getIncidentDetails(id: string, env: Env): Promise<Incident
     sqlQuery: `SELECT * FROM incidents WHERE id = '${id.replace(/'/g, "''")}'`
   });
 
-  if (!result.results || result.results.length === 0) {
+  if (!result.results) {
     throw new NotFoundError(`Incident ${id} not found`);
   }
 
-  const row = result.results[0] as any;
+  // SmartSQL returns results as string, need to parse it
+  let resultsArray: any[] = [];
+  if (typeof result.results === 'string') {
+    try {
+      const parsed = JSON.parse(result.results);
+      resultsArray = Array.isArray(parsed) ? parsed : (parsed.results || []);
+    } catch (e) {
+      env.logger.error('Failed to parse results', { results: result.results });
+      throw new NotFoundError(`Incident ${id} not found`);
+    }
+  } else {
+    resultsArray = Array.isArray(result.results) ? result.results : [];
+  }
+
+  if (resultsArray.length === 0) {
+    throw new NotFoundError(`Incident ${id} not found`);
+  }
+
+  const row = resultsArray[0];
   const incident: Incident = {
     id: row.id,
     title: row.title,
