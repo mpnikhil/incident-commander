@@ -1,6 +1,4 @@
 application "incident-commander" {
-  // Simplified single-service architecture
-
   // Main SRE API service handling all functionality
   service "sre-api" {
     visibility = "public"
@@ -18,6 +16,26 @@ application "incident-commander" {
 
   // Actor managing incident state and history (persistent storage)
   actor "incident-data" {
+    visibility = "application"
+  }
+
+  // Incident orchestration and workflow management
+  service "incident-orchestrator" {
+    visibility = "application"
+  }
+
+  // Observer for monitoring and notifications
+  service "notification-observer" {
+    visibility = "application"
+  }
+
+  // Root cause analysis engine
+  service "rca-engine" {
+    visibility = "application"
+  }
+
+  // Remediation coordination service
+  service "remediation-coordinator" {
     visibility = "application"
   }
 
