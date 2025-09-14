@@ -54,6 +54,9 @@ export default class extends Service<Env> {
                 incident.severity, incident.trace_id, incident.created_at, incident.updated_at)
           .run();
 
+        // Pretty: Incident Created
+        this.pretty('Incident Created', incident, traceId);
+
         this.env.logger.info('Incident created, starting SYNC GPT analysis', {
           traceId,
           incidentId: incident?.id,
@@ -334,7 +337,7 @@ export default class extends Service<Env> {
       <h2>Demo: Trigger Sample Incidents</h2>
       <div class="content">
         <div id="toolbar" class="grid" style="margin-bottom: 10px;">
-          <button class="btn primary" onclick="createIncident({ title: 'User API Pod OOM Error', description: 'OutOfMemoryError detected in user-api pod, memory usage at 95%', severity: 'critical' })">Trigger OOM</button>
+          <button class="btn primary" onclick="createIncident({ title: 'User API Pod OOM Error', description: 'Excessive GC detected, high heap usage', severity: 'critical' })">Trigger OOM</button>
           <button class="btn danger" onclick="createIncident({ title: 'PostgreSQL Database Connection Lost', description: 'Primary database cluster is unreachable, connection timeouts', severity: 'critical' })">Trigger DB Outage</button>
           <button class="btn warn" onclick="createIncident({ title: 'Analytics Worker High CPU', description: 'CPU sustained > 95% for 10m', severity: 'medium' })">Trigger High CPU</button>
           <button class="btn" onclick="createIncident({ title: 'Mystery Service Issue', description: 'Unknown service behavior detected', severity: 'low' })">Trigger Unknown</button>
@@ -377,7 +380,7 @@ export default class extends Service<Env> {
 
   // Helper method to call tools via ServiceStub RPCs (no HTTP)
   private async callTool(toolName: string, args: any, env: Env, traceId: string): Promise<any> {
-    env.logger.info('Calling tool via tools-api', { traceId, toolName, args });
+    env.logger.debug?.('Calling tool via tools-api', { traceId, toolName, args });
     switch (toolName) {
       case 'map-alert-to-runbook':
         return await env.TOOLS_API.mapAlertToRunbook(args.alertType, traceId);
@@ -503,7 +506,7 @@ export default class extends Service<Env> {
 
   // Execute tool calls requested by GPT
   private async executeTool(toolName: string, args: any, env: Env, traceId: string): Promise<any> {
-    env.logger.info('Executing tool call', { traceId, toolName, args });
+    env.logger.debug?.('Executing tool call', { traceId, toolName, args });
 
     // Map function names to tool endpoints
     const toolMapping: Record<string, string> = {
@@ -520,6 +523,30 @@ export default class extends Service<Env> {
     }
 
     return await this.callTool(endpoint, args, env, traceId);
+  }
+
+  // Pretty logging helpers to make hackathon demo shine
+  private formatPrettyBlock(title: string, data: any, traceId?: string): string {
+    const timestamp = new Date().toISOString();
+    const header = `╔══ ${title} ═════════════════════════════════════════════════════════════`;
+    const meta = `║ traceId: ${traceId || 'n/a'}  •  at: ${timestamp}`;
+    const separator = `╟────────────────────────────────────────────────────────────────────`;
+    const bodyRaw = data == null
+      ? 'No data'
+      : (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+    const body = bodyRaw.split('\n').map(line => `║ ${line}`).join('\n');
+    const footer = `╚════════════════════════════════════════════════════════════════════`;
+    return `\n${header}\n${meta}\n${separator}\n${body}\n${footer}`;
+  }
+
+  private pretty(title: string, data: any, traceId?: string) {
+    const block = this.formatPrettyBlock(title, data, traceId);
+    this.env.logger.debug?.(block, { traceId, title });
+  }
+
+  private prettyInfo(title: string, data: any, traceId?: string) {
+    const block = this.formatPrettyBlock(title, data, traceId);
+    this.env.logger.info(block, { traceId, title });
   }
 
   // GPT-powered incident analysis with agentic tool calling
@@ -668,6 +695,15 @@ Begin by mapping this incident to the appropriate runbook using map_alert_to_run
           traceId,
           parsed
         });
+
+        // Pretty log the AI inference in a crisp block (INFO level)
+        this.prettyInfo('AI Inference (parsed)', {
+          iteration,
+          tool_calls_count: toolCallCount,
+          tool_calls: (toolCalls || []).map(tc => ({ name: tc.name, arguments: tc.arguments })),
+          has_final: hasFinal,
+          final: hasFinal ? parsed.final : undefined
+        }, traceId);
         if (toolCalls && toolCalls.length > 0) {
           env.logger.info('Processing tool calls', { traceId, toolCallCount: toolCalls.length });
 
@@ -679,6 +715,9 @@ Begin by mapping this incident to the appropriate runbook using map_alert_to_run
               const functionName = toolCall.name;
               const args = typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : toolCall.arguments || {};
 
+              // Pretty: Tool Call Requested
+              this.pretty(`Tool Call: ${functionName}`, { arguments: args }, traceId);
+
               env.logger.info('Executing tool', { traceId, functionName, args });
               const toolResult = await this.executeTool(functionName, args, env, traceId);
 
@@ -687,6 +726,9 @@ Begin by mapping this incident to the appropriate runbook using map_alert_to_run
 
               // Log full tool result
               env.logger.info('Tool result', { traceId, functionName, result: toolResult });
+
+              // Pretty tool result block
+              this.pretty(`Tool Result: ${functionName}`, { arguments: args, result: toolResult }, traceId);
 
             } catch (toolError: any) {
               const errName = toolCall?.name || 'unknown';
@@ -731,6 +773,9 @@ ${JSON.stringify({ tool_results: toolResults }, null, 2)}`;
             iterations: iteration
           });
 
+          // Pretty final outcome
+          this.pretty('Incident Analysis Completed', finalAnalysis, traceId);
+
           return;
         }
       }
@@ -755,6 +800,9 @@ ${JSON.stringify({ tool_results: toolResults }, null, 2)}`;
               new Date().toISOString(), incident.id)
         .run();
 
+      // Pretty final outcome on max-iteration completion
+      this.pretty('Incident Analysis Completed (max iterations)', finalAnalysis, traceId);
+
     } catch (error: any) {
       env.logger.error('Agentic incident analysis failed', {
         traceId,
@@ -769,6 +817,9 @@ ${JSON.stringify({ tool_results: toolResults }, null, 2)}`;
         .prepare('UPDATE incidents SET status = ?, updated_at = ?, rca_analysis = ? WHERE id = ?')
         .bind('failed', new Date().toISOString(), JSON.stringify({ error: error.message }), incident.id)
         .run();
+
+      // Pretty failure block
+      this.pretty('Incident Analysis Failed', { error: error.message, stack: error.stack }, traceId);
     }
   }
 }

@@ -1,4 +1,4 @@
-globalThis.__RAINDROP_GIT_COMMIT_SHA = "4f05f449ff665a8812edbc34b9397e600472b5c7";
+globalThis.__RAINDROP_GIT_COMMIT_SHA = "c5a6ad7cf0141fa859b0e6e14596cdcc5a48277b";
 
 // src/sre-agent/index.ts
 import { Service } from "./runtime.js";
@@ -1624,6 +1624,7 @@ var sre_agent_default = class extends Service {
           incident.created_at,
           incident.updated_at
         ).run();
+        this.pretty("Incident Created", incident, traceId);
         this.env.logger.info("Incident created, starting SYNC GPT analysis", {
           traceId,
           incidentId: incident?.id,
@@ -1692,11 +1693,263 @@ var sre_agent_default = class extends Service {
         return c.json({ error: "Failed to list incidents" }, 500);
       }
     });
+    const uiHtml = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Incident Commander - Demo</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #121923;
+      --muted: #9fb0c3;
+      --text: #e6edf3;
+      --accent: #4f8cff;
+      --accent-2: #22c55e;
+      --danger: #ef4444;
+      --warn: #f59e0b;
+      --shadow: 0 8px 24px rgba(0,0,0,0.35);
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji; background: linear-gradient(180deg, #0b0f14, #0b0f14 60%, #0e1420); color: var(--text); }
+    header { padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.06); position: sticky; top: 0; background: rgba(11,15,20,0.85); backdrop-filter: blur(8px); z-index: 10; }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.2px; }
+    .brand .dot { width: 10px; height: 10px; border-radius: 999px; background: radial-gradient(circle at 30% 30%, #7cf, #4f8cff); box-shadow: 0 0 24px #4f8cff88; }
+    .container { max-width: 1180px; margin: 24px auto; padding: 0 16px; display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 16px; }
+    @media (max-width: 980px) { .container { grid-template-columns: 1fr; } }
+    .card { background: linear-gradient(180deg, #141c27, #101723); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+    .card h2 { margin: 0; padding: 16px 16px; font-size: 16px; font-weight: 600; color: var(--muted); border-bottom: 1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)); }
+    .content { padding: 16px; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .btn { appearance: none; border: 0; padding: 10px 14px; border-radius: 10px; color: white; background: #1b2636; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: transform 0.03s ease, background 0.2s ease, border-color 0.2s ease; }
+    .btn:hover { background: #213049; border-color: rgba(255,255,255,0.18); }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: linear-gradient(180deg, #4f8cff, #3d79ee); border-color: #5a97ff; box-shadow: 0 6px 18px #4f8cff40; }
+    .btn.ok { background: linear-gradient(180deg, #22c55e, #18a34a); border-color: #26d368; box-shadow: 0 6px 18px #22c55e40; }
+    .btn.warn { background: linear-gradient(180deg, #f59e0b, #d97706); border-color: #f59e0b; }
+    .btn.danger { background: linear-gradient(180deg, #ef4444, #dc2626); border-color: #ef4444; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+    .list { display: grid; gap: 10px; }
+    .inc { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 12px; display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    .inc:hover { background: rgba(255,255,255,0.045); }
+    .inc .title { font-weight: 600; }
+    .inc .meta { color: var(--muted); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .pill { font-size: 12px; padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04); }
+    .pill.ok { border-color: #22c55e66; color: #86efac; background: #052916; }
+    .pill.warn { border-color: #f59e0b66; color: #fed7aa; background: #2a1e05; }
+    .pill.crit { border-color: #ef444466; color: #fecaca; background: #2b0b0b; }
+    .muted { color: var(--muted); }
+    .details { background: rgba(0,0,0,0.35); border: 1px dashed rgba(255,255,255,0.12); border-radius: 10px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace; font-size: 12px; white-space: pre-wrap; color: #cbd5e1; overflow: auto; max-height: 260px; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+    .footer { padding: 12px 16px; color: var(--muted); font-size: 12px; text-align: center; }
+    .field { display: grid; gap: 6px; }
+    .field input, .field textarea, .field select { width: 100%; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); color: var(--text); padding: 10px 12px; border-radius: 10px; outline: none; }
+    .field textarea { resize: vertical; min-height: 80px; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+  </style>
+  <script>
+    const state = { incidents: [], selected: null, loading: false };
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const el = (q) => document.querySelector(q);
+    const fmtTime = (s) => new Date(s || Date.now()).toLocaleString();
+
+    async function fetchIncidents() {
+      try {
+        const res = await fetch('/incidents');
+        const data = await res.json();
+        state.incidents = Array.isArray(data.incidents) ? data.incidents : [];
+        renderList();
+      } catch (e) {
+        console.error('Failed to fetch incidents', e);
+      }
+    }
+
+    function parseMaybeJson(value) {
+      if (value == null) return null;
+      try { return typeof value === 'string' ? JSON.parse(value) : value; } catch { return value; }
+    }
+
+    async function createIncident(payload) {
+      state.loading = true; renderToolbar();
+      try {
+        const res = await fetch('/incidents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (data?.incident?.id) {
+          await sleep(1200);
+          await fetchIncidents();
+          selectIncident(data.incident.id);
+        }
+      } catch (e) {
+        console.error('Failed to create incident', e);
+      } finally {
+        state.loading = false; renderToolbar();
+      }
+    }
+
+    function selectIncident(id) {
+      state.selected = (state.incidents || []).find(x => x.id === id) || null;
+      renderDetails();
+    }
+
+    function sevPill(severity) {
+      const sev = String(severity || 'medium').toLowerCase();
+      if (sev === 'critical' || sev === 'high') return '<span class="pill crit">' + sev + '</span>';
+      if (sev === 'low') return '<span class="pill ok">' + sev + '</span>';
+      return '<span class="pill warn">' + sev + '</span>';
+    }
+
+    function statusPill(status) {
+      const st = String(status || 'new').toLowerCase();
+      if (st === 'resolved') return '<span class="pill ok">' + st + '</span>';
+      if (st === 'failed') return '<span class="pill crit">' + st + '</span>';
+      return '<span class="pill">' + st + '</span>';
+    }
+
+    function renderList() {
+      const list = el('#inc-list');
+      if (!list) return;
+      const items = (state.incidents || []).map(inc => {
+        return '<div class="inc" role="button" onclick="selectIncident('' + inc.id + '')">
+'
+          + '  <div>
+'
+          + '    <div class="title">' + (inc.title || 'Untitled Incident') + '</div>
+'
+          + '    <div class="meta">
+'
+          + '      ' + sevPill(inc.severity) + '
+'
+          + '      ' + statusPill(inc.status) + '
+'
+          + '      <span class="muted">Created ' + fmtTime(inc.created_at) + '</span>
+'
+          + '    </div>
+'
+          + '  </div>
+'
+          + '  <div class="muted">\u203A</div>
+'
+          + '</div>';
+      }).join('');
+      list.innerHTML = items || '<div class="muted">No incidents yet</div>';
+    }
+
+    function renderToolbar() {
+      el('#toolbar').querySelectorAll('button').forEach(b => b.disabled = !!state.loading);
+      el('#create-btn').disabled = !!state.loading;
+      el('#create-btn').innerText = state.loading ? 'Creating\u2026' : 'Create Incident';
+    }
+
+    function renderDetails() {
+      const d = el('#inc-details');
+      if (!d) return;
+      if (!state.selected) { d.innerHTML = '<div class="muted">Select an incident to view details</div>'; return; }
+      const inc = state.selected;
+      const analysis = parseMaybeJson(inc.rca_analysis);
+      const actions = parseMaybeJson(inc.actions_taken);
+      d.innerHTML = ''
+        + '<div class="split">
+'
+        + '  <div>
+'
+        + '    <div class="muted">Incident</div>
+'
+        + '    <div class="details">' + (JSON.stringify(inc, null, 2)) + '</div>
+'
+        + '  </div>
+'
+        + '  <div>
+'
+        + '    <div class="muted">RCA Analysis</div>
+'
+        + '    <div class="details">' + (analysis ? JSON.stringify(analysis, null, 2) : 'Not available yet') + '</div>
+'
+        + '  </div>
+'
+        + '</div>
+'
+        + '<div style="height: 10px"></div>
+'
+        + '<div>
+'
+        + '  <div class="muted">Actions Taken</div>
+'
+        + '  <div class="details">' + (actions ? JSON.stringify(actions, null, 2) : 'None recorded yet') + '</div>
+'
+        + '</div>
+';
+    }
+
+    async function init() {
+      await fetchIncidents();
+      renderToolbar();
+      renderDetails();
+      setInterval(fetchIncidents, 7000);
+    }
+
+    window.addEventListener('DOMContentLoaded', init);
+  <\/script>
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="dot"></span> Incident Commander</div>
+  </header>
+  <div class="container">
+    <section class="card">
+      <h2>Triggered Incidents</h2>
+      <div class="content">
+        <div id="inc-list" class="list"></div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Demo: Trigger Sample Incidents</h2>
+      <div class="content">
+        <div id="toolbar" class="grid" style="margin-bottom: 10px;">
+          <button class="btn primary" onclick="createIncident({ title: 'User API Pod OOM Error', description: 'Excessive GC detected, high heap usage', severity: 'critical' })">Trigger OOM</button>
+          <button class="btn danger" onclick="createIncident({ title: 'PostgreSQL Database Connection Lost', description: 'Primary database cluster is unreachable, connection timeouts', severity: 'critical' })">Trigger DB Outage</button>
+          <button class="btn warn" onclick="createIncident({ title: 'Analytics Worker High CPU', description: 'CPU sustained > 95% for 10m', severity: 'medium' })">Trigger High CPU</button>
+          <button class="btn" onclick="createIncident({ title: 'Mystery Service Issue', description: 'Unknown service behavior detected', severity: 'low' })">Trigger Unknown</button>
+        </div>
+        <div class="card" style="background: rgba(0,0,0,0.25); border-color: rgba(255,255,255,0.06);">
+          <div class="content">
+            <div class="row" style="margin-bottom: 10px; justify-content: space-between; align-items: center;">
+              <div class="muted">Custom Incident</div>
+            </div>
+            <div class="grid">
+              <div class="field"><label class="muted">Title</label><input id="f-title" placeholder="e.g. Checkout service 5xx spike" /></div>
+              <div class="field"><label class="muted">Severity</label>
+                <select id="f-sev">
+                  <option>low</option>
+                  <option selected>medium</option>
+                  <option>high</option>
+                  <option>critical</option>
+                </select>
+              </div>
+            </div>
+            <div class="field" style="margin-top: 8px"><label class="muted">Description</label><textarea id="f-desc" placeholder="Describe the symptoms, e.g. error rates, latencies, events"></textarea></div>
+            <div style="height: 10px"></div>
+            <button id="create-btn" class="btn ok" onclick="createIncident({ title: el('#f-title').value, description: el('#f-desc').value, severity: el('#f-sev').value })">Create Incident</button>
+          </div>
+        </div>
+        <div style="height: 12px"></div>
+        <div id="inc-details"></div>
+      </div>
+      <div class="footer">Powered by Agentic Runbooks \u2022 Live demo</div>
+    </section>
+  </div>
+</body>
+</html>`;
+    app.get("/", (c) => c.html(uiHtml));
+    app.get("/ui", (c) => c.html(uiHtml));
     return app.fetch(request);
   }
   // Helper method to call tools via ServiceStub RPCs (no HTTP)
   async callTool(toolName, args, env, traceId) {
-    env.logger.info("Calling tool via tools-api", { traceId, toolName, args });
+    env.logger.debug?.("Calling tool via tools-api", { traceId, toolName, args });
     switch (toolName) {
       case "map-alert-to-runbook":
         return await env.TOOLS_API.mapAlertToRunbook(args.alertType, traceId);
@@ -1820,7 +2073,7 @@ var sre_agent_default = class extends Service {
   }
   // Execute tool calls requested by GPT
   async executeTool(toolName, args, env, traceId) {
-    env.logger.info("Executing tool call", { traceId, toolName, args });
+    env.logger.debug?.("Executing tool call", { traceId, toolName, args });
     const toolMapping = {
       "map_alert_to_runbook": "map-alert-to-runbook",
       "get_logs": "get-logs",
@@ -1833,6 +2086,30 @@ var sre_agent_default = class extends Service {
       throw new Error(`Unknown tool: ${toolName}`);
     }
     return await this.callTool(endpoint, args, env, traceId);
+  }
+  // Pretty logging helpers to make hackathon demo shine
+  formatPrettyBlock(title, data, traceId) {
+    const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+    const header = `\u2554\u2550\u2550 ${title} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`;
+    const meta = `\u2551 traceId: ${traceId || "n/a"}  \u2022  at: ${timestamp}`;
+    const separator = `\u255F\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`;
+    const bodyRaw = data == null ? "No data" : typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    const body = bodyRaw.split("\n").map((line) => `\u2551 ${line}`).join("\n");
+    const footer = `\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`;
+    return `
+${header}
+${meta}
+${separator}
+${body}
+${footer}`;
+  }
+  pretty(title, data, traceId) {
+    const block = this.formatPrettyBlock(title, data, traceId);
+    this.env.logger.debug?.(block, { traceId, title });
+  }
+  prettyInfo(title, data, traceId) {
+    const block = this.formatPrettyBlock(title, data, traceId);
+    this.env.logger.info(block, { traceId, title });
   }
   // GPT-powered incident analysis with agentic tool calling
   async analyzeIncident(env, incident, traceId) {
@@ -1961,6 +2238,13 @@ ITERATION CONTEXT:
           traceId,
           parsed
         });
+        this.prettyInfo("AI Inference (parsed)", {
+          iteration,
+          tool_calls_count: toolCallCount,
+          tool_calls: (toolCalls || []).map((tc) => ({ name: tc.name, arguments: tc.arguments })),
+          has_final: hasFinal,
+          final: hasFinal ? parsed.final : void 0
+        }, traceId);
         if (toolCalls && toolCalls.length > 0) {
           env.logger.info("Processing tool calls", { traceId, toolCallCount: toolCalls.length });
           toolCallsExecuted = true;
@@ -1969,11 +2253,13 @@ ITERATION CONTEXT:
             try {
               const functionName = toolCall.name;
               const args = typeof toolCall.arguments === "string" ? JSON.parse(toolCall.arguments) : toolCall.arguments || {};
+              this.pretty(`Tool Call: ${functionName}`, { arguments: args }, traceId);
               env.logger.info("Executing tool", { traceId, functionName, args });
               const toolResult = await this.executeTool(functionName, args, env, traceId);
               actionsTaken.push(`${functionName}: ${JSON.stringify(args)} -> ${JSON.stringify(toolResult)}`);
               toolResults.push({ name: functionName, arguments: args, result: toolResult });
               env.logger.info("Tool result", { traceId, functionName, result: toolResult });
+              this.pretty(`Tool Result: ${functionName}`, { arguments: args, result: toolResult }, traceId);
             } catch (toolError) {
               const errName = toolCall?.name || "unknown";
               env.logger.error("Tool execution failed", { traceId, toolCall: errName, error: toolError.message });
@@ -2010,6 +2296,7 @@ ${JSON.stringify({ tool_results: toolResults }, null, 2)}`;
             totalDuration: Date.now() - analysisStart,
             iterations: iteration
           });
+          this.pretty("Incident Analysis Completed", finalAnalysis2, traceId);
           return;
         }
       }
@@ -2031,6 +2318,7 @@ ${JSON.stringify({ tool_results: toolResults }, null, 2)}`;
         (/* @__PURE__ */ new Date()).toISOString(),
         incident.id
       ).run();
+      this.pretty("Incident Analysis Completed (max iterations)", finalAnalysis, traceId);
     } catch (error) {
       env.logger.error("Agentic incident analysis failed", {
         traceId,
@@ -2040,6 +2328,7 @@ ${JSON.stringify({ tool_results: toolResults }, null, 2)}`;
         duration: Date.now() - analysisStart
       });
       await env.INCIDENTS_DB.prepare("UPDATE incidents SET status = ?, updated_at = ?, rca_analysis = ? WHERE id = ?").bind("failed", (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify({ error: error.message }), incident.id).run();
+      this.pretty("Incident Analysis Failed", { error: error.message, stack: error.stack }, traceId);
     }
   }
 };
