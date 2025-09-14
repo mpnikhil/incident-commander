@@ -62,10 +62,126 @@ export interface NotificationResult {
 export class McpClientManager {
   private logger: any;
   private env: any;
+  private availableTools: Map<string, any[]> = new Map();
 
   constructor(logger: any, env: any) {
     this.logger = logger;
     this.env = env;
+    this.initializeAvailableTools();
+  }
+
+  // Initialize available tools for each MCP service
+  private initializeAvailableTools() {
+    this.availableTools.set('mapping-mcp', [
+      {
+        name: 'map-alert-to-service',
+        description: 'Map alert types to service information',
+        parameters: ['alertType', 'incidentTitle', 'incidentDescription']
+      },
+      {
+        name: 'get-runbook',
+        description: 'Get runbook content for a service',
+        parameters: ['serviceName', 'incidentType']
+      }
+    ]);
+
+    this.availableTools.set('observability-mcp', [
+      {
+        name: 'get-logs',
+        description: 'Retrieve logs for a service',
+        parameters: ['serviceName', 'timeRange', 'incidentType']
+      },
+      {
+        name: 'get-metrics',
+        description: 'Retrieve metrics for a service',
+        parameters: ['serviceName', 'incidentType']
+      },
+      {
+        name: 'get-dashboard-data',
+        description: 'Get dashboard data for monitoring',
+        parameters: ['serviceName', 'timeRange']
+      }
+    ]);
+
+    this.availableTools.set('remediation-mcp', [
+      {
+        name: 'restart-pod',
+        description: 'Restart a pod (use with caution)',
+        parameters: ['podName', 'namespace', 'incidentType', 'reason']
+      },
+      {
+        name: 'send-notification',
+        description: 'Send notification to team',
+        parameters: ['message', 'severity', 'channel', 'incidentType', 'serviceName']
+      },
+      {
+        name: 'scale-service',
+        description: 'Scale a service up or down',
+        parameters: ['serviceName', 'namespace', 'replicas']
+      }
+    ]);
+  }
+
+  // Get available tools for agentic planning
+  getAvailableTools(): Map<string, any[]> {
+    return this.availableTools;
+  }
+
+  // Get tools for a specific service
+  getToolsForService(serviceName: string): any[] {
+    return this.availableTools.get(serviceName) || [];
+  }
+
+  // Execute a tool dynamically based on AI planning
+  async executeTool(serviceName: string, toolName: string, args: any): Promise<any> {
+    this.logger.info(`Executing tool: ${serviceName}.${toolName}`, { args });
+    
+    // Validate tool exists
+    const serviceTools = this.availableTools.get(serviceName);
+    if (!serviceTools || !serviceTools.find(tool => tool.name === toolName)) {
+      throw new Error(`Tool ${toolName} not found in service ${serviceName}`);
+    }
+
+    // Execute the tool
+    return await this.simulateMcpCall(serviceName, toolName, args);
+  }
+
+  // Helper method for AI calls with retry logic
+  private async callAIWithRetry(messages: any[], maxTokens: number = 200, temperature: number = 0.3): Promise<any> {
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
+        const aiResponse = await this.env.AI.run('gpt-oss-120b', {
+          model: 'gpt-oss-120b',
+          messages,
+          max_tokens: maxTokens,
+          temperature
+        });
+        return aiResponse;
+      } catch (aiError) {
+        retryCount++;
+        const errorMessage = String(aiError);
+        
+        if (errorMessage.includes('Capacity temporarily exceeded') && retryCount < maxRetries) {
+          this.logger.warn(`AI capacity exceeded, retrying ${retryCount}/${maxRetries}`, { 
+            error: errorMessage,
+            retryCount 
+          });
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+          continue;
+        } else {
+          // Either not a capacity error or max retries reached
+          this.logger.error('AI call failed after retries', { 
+            error: errorMessage,
+            retryCount 
+          });
+          throw aiError;
+        }
+      }
+    }
   }
 
   // Simulate MCP tool calls by directly calling the AI-powered logic
@@ -92,13 +208,11 @@ export class McpClientManager {
       // Simulate AI-powered service mapping
       const { alertType, incidentTitle, incidentDescription } = args;
       
-      // Use AI to determine service mapping
-      const aiResponse = await this.env.AI.run('gpt-oss-120b', {
-        model: 'gpt-oss-120b',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert SRE service mapping agent. Map alerts to services.
+      // Use AI to determine service mapping with retry logic
+      const aiResponse = await this.callAIWithRetry([
+        {
+          role: 'system',
+          content: `You are an expert SRE service mapping agent. Map alerts to services.
 
 SERVICE INVENTORY:
 - user-api: Frontend API service, prone to OOM issues
@@ -107,15 +221,12 @@ SERVICE INVENTORY:
 - redis-cache: Caching layer, memory intensive
 
 Return JSON with service mapping.`
-          },
-          {
-            role: 'user',
-            content: `Map this alert: ${alertType} - ${incidentTitle}`
-          }
-        ],
-        max_tokens: 200,
-        temperature: 0.3
-      });
+        },
+        {
+          role: 'user',
+          content: `Map this alert: ${alertType} - ${incidentTitle}`
+        }
+      ], 200, 0.3);
 
       const aiAnalysis = aiResponse.choices?.[0]?.message?.content || '{}';
       let serviceInfo;
@@ -151,22 +262,17 @@ Return JSON with service mapping.`
     if (toolName === 'get-runbook') {
       const { serviceName, incidentType } = args;
       
-      // Generate AI-powered runbook
-      const aiResponse = await this.env.AI.run('gpt-oss-120b', {
-        model: 'gpt-oss-120b',
-        messages: [
-          {
-            role: 'system',
-            content: `Generate a runbook for ${serviceName} incident response.`
-          },
-          {
-            role: 'user',
-            content: `Create runbook for: ${serviceName} - ${incidentType || 'general'}`
-          }
-        ],
-        max_tokens: 400,
-        temperature: 0.2
-      });
+      // Generate AI-powered runbook with retry logic
+      const aiResponse = await this.callAIWithRetry([
+        {
+          role: 'system',
+          content: `Generate a runbook for ${serviceName} incident response.`
+        },
+        {
+          role: 'user',
+          content: `Create runbook for: ${serviceName} - ${incidentType || 'general'}`
+        }
+      ], 400, 0.2);
 
       const runbook = aiResponse.choices?.[0]?.message?.content || `# ${serviceName} Runbook\n\nStandard incident response procedures.`;
       
