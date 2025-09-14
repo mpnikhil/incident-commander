@@ -10,5 +10,6 @@ export interface Env {
   INCIDENTS_DB: SqlDatabase;
   logger: Logger;
   SRE_AGENT: ServiceStub<import('../sre-agent/index.js').default>;
+  TOOLS_API: ServiceStub<import('../tools-api/index.js').default>;
   tracer: Tracer;
 }

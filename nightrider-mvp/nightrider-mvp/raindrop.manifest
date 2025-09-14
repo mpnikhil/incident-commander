@@ -5,18 +5,7 @@ application "nightrider-mvp" {
     visibility = "public"
   }
 
-  mcp_service "remediation-mcp" {
-    visibility = "protected"
-    authorization_server = "https://authkit.liquidmetal.run"
-  }
-
-  mcp_service "mapping-mcp" {
-    visibility = "protected"
-    authorization_server = "https://authkit.liquidmetal.run"
-  }
-
-  mcp_service "observability-mcp" {
-    visibility = "protected"
-    authorization_server = "https://authkit.liquidmetal.run"
+  service "tools-api" {
+    visibility = "public"
   }
 }

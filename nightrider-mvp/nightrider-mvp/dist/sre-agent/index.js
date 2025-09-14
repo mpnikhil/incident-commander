@@ -1,4 +1,4 @@
-globalThis.__RAINDROP_GIT_COMMIT_SHA = "bad785ec7992d9b71197b41578d4d1ce5d7e0e61";
+globalThis.__RAINDROP_GIT_COMMIT_SHA = "4f05f449ff665a8812edbc34b9397e600472b5c7";
 
 // src/sre-agent/index.ts
 import { Service } from "./runtime.js";
@@ -1694,10 +1694,150 @@ var sre_agent_default = class extends Service {
     });
     return app.fetch(request);
   }
-  // GPT-powered incident analysis with autonomous actions
+  // Helper method to call tools via ServiceStub RPCs (no HTTP)
+  async callTool(toolName, args, env, traceId) {
+    env.logger.info("Calling tool via tools-api", { traceId, toolName, args });
+    switch (toolName) {
+      case "map-alert-to-runbook":
+        return await env.TOOLS_API.mapAlertToRunbook(args.alertType, traceId);
+      case "get-logs":
+        return await env.TOOLS_API.getLogs(args.serviceName, args.timeRange, traceId);
+      case "get-metrics":
+        return await env.TOOLS_API.getMetrics(args.serviceName, traceId);
+      case "restart-pod":
+        return await env.TOOLS_API.restartPod(args.podName, args.namespace, traceId);
+      case "send-notification":
+        return await env.TOOLS_API.sendNotification(args.message, args.severity, args.channel, traceId);
+      default:
+        throw new Error(`Unknown tool endpoint: ${toolName}`);
+    }
+  }
+  // Define available tools that GPT can call
+  getToolDefinitions() {
+    return [
+      {
+        type: "function",
+        function: {
+          name: "map_alert_to_runbook",
+          description: "Map an alert type to the appropriate runbook",
+          parameters: {
+            type: "object",
+            properties: {
+              alertType: {
+                type: "string",
+                description: "The type of alert (oom, database_outage, high_cpu, etc.)"
+              }
+            },
+            required: ["alertType"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_logs",
+          description: "Retrieve logs for a specific service",
+          parameters: {
+            type: "object",
+            properties: {
+              serviceName: {
+                type: "string",
+                description: "Name of the service to get logs for"
+              },
+              timeRange: {
+                type: "string",
+                description: "Time range for logs (e.g., 15m, 1h)"
+              }
+            },
+            required: ["serviceName", "timeRange"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_metrics",
+          description: "Retrieve metrics for a specific service",
+          parameters: {
+            type: "object",
+            properties: {
+              serviceName: {
+                type: "string",
+                description: "Name of the service to get metrics for"
+              }
+            },
+            required: ["serviceName"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "restart_pod",
+          description: "Restart a Kubernetes pod",
+          parameters: {
+            type: "object",
+            properties: {
+              podName: {
+                type: "string",
+                description: "Name of the pod to restart"
+              },
+              namespace: {
+                type: "string",
+                description: "Kubernetes namespace"
+              }
+            },
+            required: ["podName", "namespace"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "send_notification",
+          description: "Send a notification to the appropriate channels",
+          parameters: {
+            type: "object",
+            properties: {
+              message: {
+                type: "string",
+                description: "Notification message"
+              },
+              severity: {
+                type: "string",
+                description: "Severity level (low, medium, high, critical)"
+              },
+              channel: {
+                type: "string",
+                description: "Notification channel (email, slack, etc.)"
+              }
+            },
+            required: ["message", "severity", "channel"]
+          }
+        }
+      }
+    ];
+  }
+  // Execute tool calls requested by GPT
+  async executeTool(toolName, args, env, traceId) {
+    env.logger.info("Executing tool call", { traceId, toolName, args });
+    const toolMapping = {
+      "map_alert_to_runbook": "map-alert-to-runbook",
+      "get_logs": "get-logs",
+      "get_metrics": "get-metrics",
+      "restart_pod": "restart-pod",
+      "send_notification": "send-notification"
+    };
+    const endpoint = toolMapping[toolName];
+    if (!endpoint) {
+      throw new Error(`Unknown tool: ${toolName}`);
+    }
+    return await this.callTool(endpoint, args, env, traceId);
+  }
+  // GPT-powered incident analysis with agentic tool calling
   async analyzeIncident(env, incident, traceId) {
     const analysisStart = Date.now();
-    env.logger.info("Starting GPT incident analysis", {
+    env.logger.info("Starting agentic GPT incident analysis", {
       traceId,
       incidentId: incident.id,
       title: incident.title,
@@ -1705,99 +1845,198 @@ var sre_agent_default = class extends Service {
     });
     try {
       await env.INCIDENTS_DB.prepare("UPDATE incidents SET status = ?, updated_at = ? WHERE id = ?").bind("analyzing", (/* @__PURE__ */ new Date()).toISOString(), incident.id).run();
-      env.logger.info("About to call AI service", { traceId, model: "gpt-oss-120b" });
-      const gptResponse = await env.AI.run("gpt-oss-120b", {
-        model: "gpt-oss-120b",
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert SRE agent. Analyze incidents and take autonomous actions when safe.
+      const actionsTaken = [];
+      const toolDefinitions = this.getToolDefinitions();
+      const toolsForPrompt = toolDefinitions.map((t) => ({ type: "function", function: t.function }));
+      const baseSystemMessage = `You are an expert SRE (Site Reliability Engineer) responsible for incident response and resolution.
+Your task is to analyze incidents and take appropriate action following SRE best practices.
 
-INCIDENT ANALYSIS RULES:
-1. For OOM (Out of Memory) issues: AUTONOMOUS pod restart is safe
-2. For Database outages: NOTIFICATION ONLY - no autonomous actions
-3. Always provide structured JSON response with reasoning
+INCIDENT DETAILS:
+- Title: ${incident.title}
+- Description: ${incident.description || "No description provided"}
+- Severity: ${incident.severity}
 
-TOOLS AVAILABLE:
-- mapping-mcp: identify services and runbooks
-- observability-mcp: gather logs/metrics
-- remediation-mcp: restart pods, send notifications
+WORKFLOW:
+1. Identify the incident type and get the appropriate runbook using map_alert_to_runbook
+2. Follow runbook procedures to investigate (use get_logs and get_metrics)
+3. Based on runbook guidance, decide on appropriate action
+4. If autonomous actions are allowed by the runbook, you may restart pods using restart_pod
+5. Always send notifications about actions taken or escalation needs using send_notification
+6. Provide final analysis and reasoning
 
-OUTPUT FORMAT: JSON with fields:
+You can simulate calling tools by returning a structured JSON plan of tool calls.
+TOOLS (OpenAI tools schema):
+${JSON.stringify({ tools: toolsForPrompt }, null, 2)}
+
+RESPONSE REQUIREMENTS (STRICT):
+- Always return ONLY a single JSON object, no prose, no markdown.
+- JSON shape:
 {
-  "incident_type": "oom" | "database_outage" | "other",
-  "root_cause_analysis": "detailed analysis",
-  "autonomous_action_safe": boolean,
-  "recommended_action": "specific action to take",
-  "reasoning": "why this action is recommended"
-}`
-          },
-          {
-            role: "user",
-            content: `Analyze this incident:
-Title: ${incident.title}
-Description: ${incident.description}
-Severity: ${incident.severity}
+  "tool_calls": [
+    { "name": "<tool_name>", "arguments": { /* args per schema */ } }
+  ],
+  "final": null
+}
+- When you have enough information to finish, return:
+{
+  "tool_calls": [],
+  "final": {
+    "analysis": "<your analysis>",
+    "actions_taken": ["<summary of actions>"]
+  }
+}
+- Ensure arguments strictly match the given tool parameter schemas.
+- If prior tool results are provided, use them to decide next tool calls or provide final.
 
-Perform root cause analysis and determine if autonomous action is safe.`
-          }
-        ],
-        max_tokens: 500,
-        temperature: 0.3
-      });
-      const analysis = gptResponse.choices?.[0]?.message?.content || "No analysis available";
-      env.logger.info("GPT analysis completed", {
-        traceId,
-        incidentId: incident.id,
-        duration: Date.now() - analysisStart,
-        analysisLength: analysis.length
-      });
-      let actionsTaken = [];
-      let parsedAnalysis = {};
-      try {
-        const jsonMatch = analysis.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsedAnalysis = JSON.parse(jsonMatch[0]);
+ITERATION POLICY:
+- You have a hard cap of 5 iterations. Prefer to finalize as soon as sufficient information is available.
+- If you anticipate needing more than 5 iterations, provide your best-effort final at or before the cap.
+
+Begin by mapping this incident to the appropriate runbook using map_alert_to_runbook.`;
+      const userMessage = `Please analyze and respond to this incident: "${incident.title}". Return ONLY JSON as specified above.`;
+      let currentUserMessage = userMessage;
+      const maxIterations = 5;
+      let iteration = 0;
+      let toolCallsExecuted = false;
+      while (iteration < maxIterations) {
+        iteration++;
+        env.logger.info("Agentic analysis iteration", { traceId, iteration });
+        const currentSystemMessage = `${baseSystemMessage}
+
+ITERATION CONTEXT:
+- iteration: ${iteration} of ${maxIterations}
+- remaining: ${maxIterations - iteration}
+- If sufficient information is available, return final now.`;
+        env.logger.info("Sending request to AI with prompt-embedded tools", {
+          traceId,
+          toolCount: toolsForPrompt.length,
+          toolNames: toolsForPrompt.map((t) => t.function.name),
+          toolsSchema: toolsForPrompt,
+          systemMessage: currentSystemMessage,
+          userMessage: currentUserMessage
+        });
+        const response = await env.AI.run("gpt-oss-120b", {
+          model: "gpt-oss-120b",
+          messages: [
+            { role: "system", content: currentSystemMessage },
+            { role: "user", content: currentUserMessage }
+          ],
+          response_format: { type: "json_object" },
+          max_tokens: 4e3,
+          temperature: 0.2
+        });
+        const message = response.choices?.[0]?.message;
+        if (!message) {
+          throw new Error("No response from AI model");
         }
-      } catch (parseError) {
-        env.logger.warn("Failed to parse GPT JSON, using text analysis", { traceId });
-        parsedAnalysis = { root_cause_analysis: analysis };
+        env.logger.info("AI raw response content", {
+          traceId,
+          content: message.content
+        });
+        let parsed = null;
+        try {
+          parsed = JSON.parse(message.content || "{}");
+        } catch (e) {
+          const match = (message.content || "").match(/\{[\s\S]*\}/);
+          if (match) {
+            try {
+              parsed = JSON.parse(match[0]);
+            } catch {
+            }
+          }
+        }
+        const messageContentLength = (message.content || "").length;
+        const toolCalls = parsed?.tool_calls;
+        const toolCallCount = Array.isArray(toolCalls) ? toolCalls.length : 0;
+        const hasFinal = parsed && typeof parsed === "object" && parsed.final != null;
+        env.logger.info("AI JSON parsed", {
+          traceId,
+          ok: parsed != null,
+          keys: parsed ? Object.keys(parsed).slice(0, 10) : [],
+          contentLength: messageContentLength,
+          toolCallCount,
+          hasFinal
+        });
+        env.logger.info("AI parsed JSON full", {
+          traceId,
+          parsed
+        });
+        if (toolCalls && toolCalls.length > 0) {
+          env.logger.info("Processing tool calls", { traceId, toolCallCount: toolCalls.length });
+          toolCallsExecuted = true;
+          let toolResults = [];
+          for (const toolCall of toolCalls) {
+            try {
+              const functionName = toolCall.name;
+              const args = typeof toolCall.arguments === "string" ? JSON.parse(toolCall.arguments) : toolCall.arguments || {};
+              env.logger.info("Executing tool", { traceId, functionName, args });
+              const toolResult = await this.executeTool(functionName, args, env, traceId);
+              actionsTaken.push(`${functionName}: ${JSON.stringify(args)} -> ${JSON.stringify(toolResult)}`);
+              toolResults.push({ name: functionName, arguments: args, result: toolResult });
+              env.logger.info("Tool result", { traceId, functionName, result: toolResult });
+            } catch (toolError) {
+              const errName = toolCall?.name || "unknown";
+              env.logger.error("Tool execution failed", { traceId, toolCall: errName, error: toolError.message });
+              actionsTaken.push(`${errName} FAILED: ${toolError.message}`);
+              toolResults.push({ name: errName, arguments: toolCall?.arguments, error: toolError.message });
+            }
+          }
+          currentUserMessage = `Tool execution results provided below. Based on these, either return next tool_calls or final. Return ONLY JSON.
+${JSON.stringify({ tool_results: toolResults }, null, 2)}`;
+        } else {
+          env.logger.info("Agentic analysis completed", { traceId, iterations: iteration });
+          const finalAnalysis2 = {
+            workflow_completed: true,
+            actions_taken: actionsTaken,
+            analysis_result: (parsed?.final?.analysis ?? message.content) || "Analysis completed",
+            ai_reasoning: parsed?.final?.analysis ?? message.content,
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            iterations: iteration,
+            tool_calls_executed: toolCallsExecuted
+          };
+          await env.INCIDENTS_DB.prepare(`UPDATE incidents
+                      SET status = ?, rca_analysis = ?, actions_taken = ?, updated_at = ?
+                      WHERE id = ?`).bind(
+            "resolved",
+            JSON.stringify(finalAnalysis2),
+            JSON.stringify(actionsTaken),
+            (/* @__PURE__ */ new Date()).toISOString(),
+            incident.id
+          ).run();
+          env.logger.info("Incident analysis completed successfully", {
+            traceId,
+            incidentId: incident.id,
+            actionCount: actionsTaken.length,
+            totalDuration: Date.now() - analysisStart,
+            iterations: iteration
+          });
+          return;
+        }
       }
-      const isOOM = incident.title.toLowerCase().includes("oom") || incident.title.toLowerCase().includes("memory") || incident.description?.toLowerCase().includes("out of memory");
-      const isDBOutage = incident.title.toLowerCase().includes("database") || incident.title.toLowerCase().includes("db");
-      if (isOOM && parsedAnalysis.autonomous_action_safe !== false) {
-        env.logger.info("Taking autonomous action for OOM incident", { traceId, incidentId: incident.id });
-        actionsTaken.push("Autonomous pod restart initiated");
-        actionsTaken.push("Notification sent: Pod restarted successfully");
-      } else if (isDBOutage) {
-        env.logger.info("Database incident detected - notification only", { traceId, incidentId: incident.id });
-        actionsTaken.push("Notification sent: Database outage requires manual intervention");
-      } else {
-        env.logger.info("General incident - notification sent", { traceId, incidentId: incident.id });
-        actionsTaken.push("Notification sent: Incident requires investigation");
-      }
+      env.logger.warn("Maximum iterations reached", { traceId, maxIterations });
+      const finalAnalysis = {
+        workflow_completed: true,
+        actions_taken: actionsTaken,
+        analysis_result: "Analysis completed after maximum iterations",
+        warning: "Maximum iteration limit reached",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        iterations: iteration
+      };
       await env.INCIDENTS_DB.prepare(`UPDATE incidents
                   SET status = ?, rca_analysis = ?, actions_taken = ?, updated_at = ?
                   WHERE id = ?`).bind(
         "resolved",
-        JSON.stringify(parsedAnalysis),
+        JSON.stringify(finalAnalysis),
         JSON.stringify(actionsTaken),
         (/* @__PURE__ */ new Date()).toISOString(),
         incident.id
       ).run();
-      env.logger.info("Incident analysis completed successfully", {
-        traceId,
-        incidentId: incident.id,
-        actionsTaken: actionsTaken.length,
-        totalDuration: Date.now() - analysisStart
-      });
     } catch (error) {
-      env.logger.error("Incident analysis failed", {
+      env.logger.error("Agentic incident analysis failed", {
         traceId,
         incidentId: incident.id,
         error: error.message,
         stack: error.stack,
-        errorName: error.name,
         duration: Date.now() - analysisStart
       });
       await env.INCIDENTS_DB.prepare("UPDATE incidents SET status = ?, updated_at = ?, rca_analysis = ? WHERE id = ?").bind("failed", (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify({ error: error.message }), incident.id).run();
