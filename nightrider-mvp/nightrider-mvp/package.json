@@ -1,0 +1,38 @@
+{
+  "name": "nightrider-mvp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LiquidMetal AI app",
+  "scripts": {
+    "build": "shx rm -rf dist && tsc -b",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "create-migration": "npx ts-node ./scripts/create_migration.mts",
+    "clean-seed": "find ./db -name '*seed*' -type f -delete",
+    "seed:createSql": "npx ts-node ./scripts/seed-sql.mts",
+    "render-db": "pnpm run clean-seed && pnpm run create-migration && pnpm run seed:createSql"
+  },
+  "devDependencies": {
+    "@liquidmetal-ai/in-memory-d1": "^1.0.7",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^11.9.1",
+    "shx": "^0.4.0",
+    "typescript": "^5.0.4",
+    "typescript-eslint": "^8.7.0",
+    "vitest": "^3.1.3",
+    "prisma": "^6.5.0",
+    "prisma-kysely": "^1.8.0",
+    "zx": "^8.5.2"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.2",
+    "@liquidmetal-ai/raindrop-framework": "^0.6.2",
+    "@modelcontextprotocol/sdk": "^1",
+    "hono": "^4.9.7",
+    "zod": "^3",
+    "kysely": "^0.27.2",
+    "kysely-d1": "^0.3.0"
+  }
+}
