@@ -1,0 +1,59 @@
+application "incident-commander" {
+  // Simplified single-service architecture
+
+  // Main SRE API service handling all functionality
+  service "sre-api" {
+    visibility = "public"
+  }
+
+  // Protected MCP server exposing SRE tools for agent
+  mcp_service "sre-mcp" {
+    visibility = "protected"
+  }
+
+  // Protected MCP server for incident simulation
+  mcp_service "simulation-mcp" {
+    visibility = "protected"
+  }
+
+  // Actor managing incident state and history (persistent storage)
+  actor "incident-data" {
+    visibility = "application"
+  }
+
+  // SmartBucket for SRE runbooks and documentation with semantic search
+  smartbucket "knowledge-base" {}
+
+  // SmartMemory for agent analysis context and learning
+  smartmemory "conversation-memory" {}
+
+  // SmartSQL for historical incident metrics with AI queries
+  smartsql "incidents-database" {}
+
+  // SUPPORTING INFRASTRUCTURE
+
+  // Queue for async notification processing
+  queue "notification-queue" {}
+
+  // Optional environment variables for external integrations
+  // Commented out to allow deployment without secrets
+  // env "SMTP_HOST" {
+  //   secret = true
+  // }
+
+  // env "SMTP_PORT" {
+  //   secret = true
+  // }
+
+  // env "SMTP_USER" {
+  //   secret = true
+  // }
+
+  // env "SMTP_PASSWORD" {
+  //   secret = true
+  // }
+
+  // env "EXTERNAL_API_KEY" {
+  //   secret = true
+  // }
+}

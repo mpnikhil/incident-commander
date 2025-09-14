@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nightrider SRE Agent Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-shield-alt"></i>
+                <h1>Nightrider SRE Agent</h1>
+            </div>
+            <div class="status-indicator">
+                <span class="status-dot" id="apiStatus"></span>
+                <span id="apiStatusText">Checking...</span>
+            </div>
+        </div>
+    </header>
+
+    <nav class="nav-tabs">
+        <div class="container">
+            <button class="tab-btn active" data-tab="dashboard">
+                <i class="fas fa-tachometer-alt"></i> Dashboard
+            </button>
+            <button class="tab-btn" data-tab="incidents">
+                <i class="fas fa-exclamation-triangle"></i> Incidents
+            </button>
+            <button class="tab-btn" data-tab="demo">
+                <i class="fas fa-flask"></i> Demo
+            </button>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        <div class="container">
+            <!-- Dashboard Tab -->
+            <div class="tab-content active" id="dashboard">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-exclamation-circle"></i>
+                        </div>
+                        <div class="stat-info">
+                            <div class="stat-number" id="totalIncidents">-</div>
+                            <div class="stat-label">Total Incidents</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon critical">
+                            <i class="fas fa-fire"></i>
+                        </div>
+                        <div class="stat-info">
+                            <div class="stat-number" id="criticalIncidents">-</div>
+                            <div class="stat-label">Critical (P0/P1)</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon success">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <div class="stat-info">
+                            <div class="stat-number" id="autoRemediated">-</div>
+                            <div class="stat-label">Auto-Remediated</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon warning">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="stat-info">
+                            <div class="stat-number" id="avgResponseTime">-</div>
+                            <div class="stat-label">Avg Response Time</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="recent-incidents">
+                    <h2><i class="fas fa-history"></i> Recent Incidents</h2>
+                    <div class="incident-list" id="recentIncidentsList">
+                        <div class="loading">Loading recent incidents...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Incidents Tab -->
+            <div class="tab-content" id="incidents">
+                <div class="incidents-header">
+                    <h2><i class="fas fa-list"></i> All Incidents</h2>
+                    <div class="filters">
+                        <select id="severityFilter">
+                            <option value="">All Severities</option>
+                            <option value="P0">P0 - Critical</option>
+                            <option value="P1">P1 - High</option>
+                            <option value="P2">P2 - Medium</option>
+                            <option value="P3">P3 - Low</option>
+                        </select>
+                        <select id="statusFilter">
+                            <option value="">All Statuses</option>
+                            <option value="received">Received</option>
+                            <option value="investigating">Investigating</option>
+                            <option value="analyzing">Analyzing</option>
+                            <option value="remediating">Remediating</option>
+                            <option value="resolved">Resolved</option>
+                            <option value="escalated">Escalated</option>
+                        </select>
+                        <button class="refresh-btn" id="refreshIncidents">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+                <div class="all-incidents-list" id="allIncidentsList">
+                    <div class="loading">Loading incidents...</div>
+                </div>
+            </div>
+
+            <!-- Demo Tab -->
+            <div class="tab-content" id="demo">
+                <div class="demo-section">
+                    <h2><i class="fas fa-flask"></i> Demo Incidents</h2>
+                    <p>Trigger realistic incident scenarios to see the SRE Agent in action.</p>
+
+                    <div class="demo-grid">
+                        <div class="demo-card">
+                            <div class="demo-icon critical">
+                                <i class="fas fa-database"></i>
+                            </div>
+                            <h3>Database Outage (P0)</h3>
+                            <p>Critical database failure requiring human approval for remediation actions.</p>
+                            <div class="demo-meta">
+                                <span class="badge critical">Semi-Autonomous</span>
+                                <span class="timing">~2-5 min analysis</span>
+                            </div>
+                            <button class="demo-btn critical" onclick="triggerDemoIncident('database')">
+                                <i class="fas fa-play"></i> Trigger Database Outage
+                            </button>
+                        </div>
+
+                        <div class="demo-card">
+                            <div class="demo-icon warning">
+                                <i class="fas fa-memory"></i>
+                            </div>
+                            <h3>OOM Crash (P2)</h3>
+                            <p>Memory exhaustion causing pod restarts with autonomous remediation capability.</p>
+                            <div class="demo-meta">
+                                <span class="badge success">Autonomous</span>
+                                <span class="timing">~10-15 min analysis</span>
+                            </div>
+                            <button class="demo-btn warning" onclick="triggerDemoIncident('oom')">
+                                <i class="fas fa-play"></i> Trigger OOM Crash
+                            </button>
+                        </div>
+
+                        <div class="demo-card">
+                            <div class="demo-icon info">
+                                <i class="fas fa-hdd"></i>
+                            </div>
+                            <h3>Disk Space Alert (P3)</h3>
+                            <p>High disk usage requiring preventive maintenance actions.</p>
+                            <div class="demo-meta">
+                                <span class="badge info">Preventive</span>
+                                <span class="timing">~15-30 min analysis</span>
+                            </div>
+                            <button class="demo-btn info" onclick="triggerDemoIncident('disk')">
+                                <i class="fas fa-play"></i> Trigger Disk Alert
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="demo-instructions">
+                        <h3><i class="fas fa-info-circle"></i> How to Use</h3>
+                        <ol>
+                            <li>Click any demo button above to trigger a realistic incident</li>
+                            <li>Watch the incident appear in the Dashboard and Incidents tabs</li>
+                            <li>See the AI agent perform analysis and recommend actions</li>
+                            <li>For P0 incidents, approve/deny remediation actions</li>
+                            <li>Monitor the autonomous remediation for P2/P3 incidents</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Incident Detail Modal -->
+    <div class="modal" id="incidentModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="incidentModalTitle">Incident Details</h2>
+                <button class="close-btn" onclick="closeIncidentModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="incidentModalBody">
+                <!-- Dynamic content will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
