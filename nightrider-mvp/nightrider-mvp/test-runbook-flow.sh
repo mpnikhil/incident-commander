@@ -97,12 +97,12 @@ fi
 
 echo "============================================"
 
-# Test 2: Create OOM incident and verify full runbook workflow
-log "Test 2: Creating OOM incident to test full runbook workflow"
+# Test 2: Create memory pressure incident and verify full runbook workflow
+log "Test 2: Creating memory pressure incident to test full runbook workflow"
 OOM_RESPONSE=$(curl -s -X POST "$BASE_URL/incidents" \
   -H "Content-Type: application/json" \
   -d '{
-    "title": "User API Pod OOM Error",
+    "title": "User API Memory Pressure",
     "description": "Excessive GC detected, high heap usage",
     "severity": "critical"
   }')
@@ -116,7 +116,7 @@ if [ -z "$OOM_ID" ]; then
     exit 1
 fi
 
-log "PASSED: Created OOM incident $OOM_ID - trace: $TRACE_ID"
+log "PASSED: Created memory pressure incident $OOM_ID - trace: $TRACE_ID"
 
 # Test 3: Wait for LLM analysis and verify tool calling occurred
 log "Test 3: Waiting for LLM analysis - 15 seconds..."
@@ -295,7 +295,7 @@ echo "============================================"
 # Summary
 log "RUNBOOK-GUIDED WORKFLOW TEST RESULTS:"
 log "Services are accessible and responding"
-log "OOM incident created and analyzed"
+log "Memory pressure incident created and analyzed"
 log "LLM inference occurred - RCA analysis present"
 log "Tools were invoked - verified via actions + logs"
 log "Database incident handled correctly - notification-only"
@@ -303,7 +303,7 @@ log "Unknown incident handled with general runbook"
 
 echo "============================================"
 log "Test Incidents Created:"
-log "  - OOM Incident: $OOM_ID"
+log "  - Memory Pressure Incident: $OOM_ID"
 log "  - Database Incident: $DB_ID"
 log "  - Unknown Incident: $UNKNOWN_ID"
 

@@ -19,7 +19,7 @@ export default class extends Service<Env> {
     // POST /incidents - Create new incident and trigger GPT analysis
     app.post('/incidents', async (c) => {
       const startTime = Date.now();
-      this.env.logger.info('Creating new incident', { traceId, timestamp: timestamp() });
+      this.env.logger.debug?.('Creating new incident', { traceId, timestamp: timestamp() });
 
       try {
         const body = await c.req.json();
@@ -54,10 +54,10 @@ export default class extends Service<Env> {
                 incident.severity, incident.trace_id, incident.created_at, incident.updated_at)
           .run();
 
-        // Pretty: Incident Created
-        this.pretty('Incident Created', incident, traceId);
+        // Pretty: Incident Created (INFO)
+        this.prettyInfo('Incident Created', incident, traceId);
 
-        this.env.logger.info('Incident created, starting SYNC GPT analysis', {
+        this.env.logger.debug?.('Incident created, starting SYNC GPT analysis', {
           traceId,
           incidentId: incident?.id,
           severity,
@@ -337,7 +337,7 @@ export default class extends Service<Env> {
       <h2>Demo: Trigger Sample Incidents</h2>
       <div class="content">
         <div id="toolbar" class="grid" style="margin-bottom: 10px;">
-          <button class="btn primary" onclick="createIncident({ title: 'User API Pod OOM Error', description: 'Excessive GC detected, high heap usage', severity: 'critical' })">Trigger OOM</button>
+          <button class="btn primary" onclick="createIncident({ title: 'User API Memory Pressure', description: 'Excessive GC detected, high heap usage', severity: 'critical' })">Trigger Memory Pressure</button>
           <button class="btn danger" onclick="createIncident({ title: 'PostgreSQL Database Connection Lost', description: 'Primary database cluster is unreachable, connection timeouts', severity: 'critical' })">Trigger DB Outage</button>
           <button class="btn warn" onclick="createIncident({ title: 'Analytics Worker High CPU', description: 'CPU sustained > 95% for 10m', severity: 'medium' })">Trigger High CPU</button>
           <button class="btn" onclick="createIncident({ title: 'Mystery Service Issue', description: 'Unknown service behavior detected', severity: 'low' })">Trigger Unknown</button>
@@ -410,7 +410,7 @@ export default class extends Service<Env> {
             properties: {
               alertType: {
                 type: 'string',
-                description: 'The type of alert (oom, database_outage, high_cpu, etc.)'
+                description: 'The type of alert (memory_pressure | gc_pressure | high_heap | oom | database_outage | high_cpu)'
               }
             },
             required: ['alertType']
@@ -552,7 +552,7 @@ export default class extends Service<Env> {
   // GPT-powered incident analysis with agentic tool calling
   private async analyzeIncident(env: Env, incident: any, traceId: string) {
     const analysisStart = Date.now();
-    env.logger.info('Starting agentic GPT incident analysis', {
+    env.logger.debug?.('Starting agentic GPT incident analysis', {
       traceId,
       incidentId: incident.id,
       title: incident.title,
@@ -629,11 +629,11 @@ Begin by mapping this incident to the appropriate runbook using map_alert_to_run
 
       while (iteration < maxIterations) {
         iteration++;
-        env.logger.info('Agentic analysis iteration', { traceId, iteration });
+        env.logger.debug?.('Agentic analysis iteration', { traceId, iteration });
 
         const currentSystemMessage = `${baseSystemMessage}\n\nITERATION CONTEXT:\n- iteration: ${iteration} of ${maxIterations}\n- remaining: ${maxIterations - iteration}\n- If sufficient information is available, return final now.`;
 
-        env.logger.info('Sending request to AI with prompt-embedded tools', {
+        env.logger.debug?.('Sending request to AI with prompt-embedded tools', {
           traceId,
           toolCount: toolsForPrompt.length,
           toolNames: toolsForPrompt.map(t => (t as any).function.name),
@@ -659,7 +659,7 @@ Begin by mapping this incident to the appropriate runbook using map_alert_to_run
         }
 
         // Log full raw assistant content for debugging
-        env.logger.info('AI raw response content', {
+        env.logger.debug?.('AI raw response content', {
           traceId,
           content: message.content
         });
@@ -681,7 +681,7 @@ Begin by mapping this incident to the appropriate runbook using map_alert_to_run
         const toolCallCount = Array.isArray(toolCalls) ? toolCalls.length : 0;
         const hasFinal = parsed && typeof parsed === 'object' && parsed.final != null;
 
-        env.logger.info('AI JSON parsed', {
+        env.logger.debug?.('AI JSON parsed', {
           traceId,
           ok: parsed != null,
           keys: parsed ? Object.keys(parsed).slice(0, 10) : [],
@@ -691,7 +691,7 @@ Begin by mapping this incident to the appropriate runbook using map_alert_to_run
         });
 
         // Log full parsed JSON for visibility
-        env.logger.info('AI parsed JSON full', {
+        env.logger.debug?.('AI parsed JSON full', {
           traceId,
           parsed
         });
@@ -705,7 +705,7 @@ Begin by mapping this incident to the appropriate runbook using map_alert_to_run
           final: hasFinal ? parsed.final : undefined
         }, traceId);
         if (toolCalls && toolCalls.length > 0) {
-          env.logger.info('Processing tool calls', { traceId, toolCallCount: toolCalls.length });
+          env.logger.debug?.('Processing tool calls', { traceId, toolCallCount: toolCalls.length });
 
           toolCallsExecuted = true;
           let toolResults: Array<{ name: string; arguments: any; result?: any; error?: string }> = [];
@@ -715,20 +715,20 @@ Begin by mapping this incident to the appropriate runbook using map_alert_to_run
               const functionName = toolCall.name;
               const args = typeof toolCall.arguments === 'string' ? JSON.parse(toolCall.arguments) : toolCall.arguments || {};
 
-              // Pretty: Tool Call Requested
-              this.pretty(`Tool Call: ${functionName}`, { arguments: args }, traceId);
+              // Pretty: Tool Request (INFO)
+              this.prettyInfo(`Tool Request: ${functionName}`, { arguments: args }, traceId);
 
-              env.logger.info('Executing tool', { traceId, functionName, args });
+              env.logger.debug?.('Executing tool', { traceId, functionName, args });
               const toolResult = await this.executeTool(functionName, args, env, traceId);
 
               actionsTaken.push(`${functionName}: ${JSON.stringify(args)} -> ${JSON.stringify(toolResult)}`);
               toolResults.push({ name: functionName, arguments: args, result: toolResult });
 
-              // Log full tool result
-              env.logger.info('Tool result', { traceId, functionName, result: toolResult });
+              // Log compact success at INFO
+              this.env.logger.info('tool.executed', { traceId, name: functionName, ok: true });
 
-              // Pretty tool result block
-              this.pretty(`Tool Result: ${functionName}`, { arguments: args, result: toolResult }, traceId);
+              // Pretty: Tool Response (INFO)
+              this.prettyInfo(`Tool Response: ${functionName}`, { arguments: args, result: toolResult }, traceId);
 
             } catch (toolError: any) {
               const errName = toolCall?.name || 'unknown';
@@ -744,7 +744,7 @@ ${JSON.stringify({ tool_results: toolResults }, null, 2)}`;
 
         } else {
           // No more tool calls, analysis is complete
-          env.logger.info('Agentic analysis completed', { traceId, iterations: iteration });
+          env.logger.debug?.('Agentic analysis completed', { traceId, iterations: iteration });
 
           const finalAnalysis = {
             workflow_completed: true,
@@ -765,7 +765,7 @@ ${JSON.stringify({ tool_results: toolResults }, null, 2)}`;
                   new Date().toISOString(), incident.id)
             .run();
 
-          env.logger.info('Incident analysis completed successfully', {
+          env.logger.debug?.('Incident analysis completed successfully', {
             traceId,
             incidentId: incident.id,
             actionCount: actionsTaken.length,
