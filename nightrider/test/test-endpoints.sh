@@ -3,7 +3,7 @@
 # Test Script for Nightrider SRE Agent Endpoints
 # This script tests all API endpoints with sample data
 
-API_URL="https://svc-01k5373qvxqt2bcydgnrcngfne.01k1v9y078eahcz45grz0g76p0.lmapp.run"
+API_URL="svc-01k53894ntdy6j4c5sa7y03jgj.01k1v9y078eahcz45grz0g76p0.lmapp.run"
 
 echo "🧪 Testing Nightrider SRE Agent API Endpoints"
 echo "API URL: $API_URL"

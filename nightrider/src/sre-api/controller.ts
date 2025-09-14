@@ -18,31 +18,69 @@ import { Env } from './raindrop.gen';
 import { RemediationResult } from './model';
 
 /**
- * Retry helper function for database operations
+ * Retry helper function for database operations with comprehensive logging
  */
 async function retryOperation<T>(
   operation: () => Promise<T>,
   maxRetries: number,
   logger: any,
+  operationName: string,
   delay: number = 1000
 ): Promise<T> {
+  const startTime = Date.now();
   let lastError: Error | null = null;
 
+  logger.debug(`Starting database operation: ${operationName}`, {
+    max_retries: maxRetries,
+    operation: operationName
+  });
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const attemptStartTime = Date.now();
     try {
-      return await operation();
+      const result = await operation();
+      const duration = Date.now() - startTime;
+
+      logger.info(`Database operation completed successfully`, {
+        operation: operationName,
+        attempt,
+        total_duration_ms: duration,
+        attempt_duration_ms: Date.now() - attemptStartTime
+      });
+
+      return result;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      logger.warn(`Database operation failed, attempt ${attempt}/${maxRetries}`, {
-        error: lastError.message,
-        attempt
+      const attemptDuration = Date.now() - attemptStartTime;
+
+      logger.warn(`Database operation failed`, {
+        operation: operationName,
+        attempt,
+        max_retries: maxRetries,
+        error_message: lastError.message,
+        error_type: lastError.constructor.name,
+        attempt_duration_ms: attemptDuration
       });
 
       if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, delay * attempt));
+        const delayTime = delay * attempt;
+        logger.debug(`Retrying operation after delay`, {
+          operation: operationName,
+          delay_ms: delayTime,
+          next_attempt: attempt + 1
+        });
+        await new Promise(resolve => setTimeout(resolve, delayTime));
       }
     }
   }
+
+  const totalDuration = Date.now() - startTime;
+  logger.error(`Database operation failed after all retries`, {
+    operation: operationName,
+    total_attempts: maxRetries,
+    total_duration_ms: totalDuration,
+    final_error: lastError?.message
+  });
 
   throw lastError || new Error('Max retries exceeded');
 }
@@ -51,11 +89,17 @@ async function retryOperation<T>(
  * Handles incoming incident alerts - Simple agent with SmartSQL storage
  */
 export async function handleIncidentAlert(alert: IncidentAlert, env: Env): Promise<ProcessingResult> {
-  env.logger.info('Processing incident alert', {
+  const startTime = Date.now();
+  const traceId = `alert_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+
+  env.logger.info('Starting incident alert processing', {
+    trace_id: traceId,
+    operation: 'handle_incident_alert',
     source: alert.source,
     severity: alert.severity,
     alert_type: alert.alert_type,
-    timestamp: alert.timestamp
+    timestamp: alert.timestamp,
+    affected_services_count: alert.affected_services?.length || 0
   });
 
   try {
@@ -87,7 +131,7 @@ export async function handleIncidentAlert(alert: IncidentAlert, env: Env): Promi
           remediation_status TEXT DEFAULT 'pending'
         )`
       });
-    }, 3, env.logger);
+    }, 3, env.logger, 'create_incidents_table');
 
     // Insert incident into database with retry
     const title = `${alert.alert_type} in ${alert.source}`.replace(/'/g, "''");
@@ -106,11 +150,17 @@ export async function handleIncidentAlert(alert: IncidentAlert, env: Env): Promi
           'received', '${source}', '${affectedServicesJson}', '${now}', '${now}', '${metadataJson}'
         )`
       });
-    }, 3, env.logger);
+    }, 3, env.logger, 'insert_incident');
 
-    env.logger.info('Incident created and stored in database', { incident_id: incidentId });
+    const processingDuration = Date.now() - startTime;
 
-    return {
+    env.logger.info('Incident created and stored in database', {
+      trace_id: traceId,
+      incident_id: incidentId,
+      processing_duration_ms: processingDuration
+    });
+
+    const result: ProcessingResult = {
       status: 'success',
       agent_analysis: {
         incident_id: incidentId,
@@ -126,11 +176,29 @@ export async function handleIncidentAlert(alert: IncidentAlert, env: Env): Promi
       timeline: ['Alert received', 'Incident created']
     };
 
-  } catch (error) {
-    env.logger.error('Failed to process incident alert', {
-      error: error instanceof Error ? error.message : String(error)
+    env.logger.info('Incident alert processing completed successfully', {
+      trace_id: traceId,
+      incident_id: incidentId,
+      total_duration_ms: processingDuration,
+      result_status: result.status
     });
-    throw new ProcessingError(`Failed to process incident alert: ${error instanceof Error ? error.message : 'Unknown error'}`);
+
+    return result;
+
+  } catch (error) {
+    const processingDuration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    env.logger.error('Failed to process incident alert', {
+      trace_id: traceId,
+      error_message: errorMessage,
+      error_type: error instanceof Error ? error.constructor.name : 'Unknown',
+      processing_duration_ms: processingDuration,
+      alert_source: alert.source,
+      alert_severity: alert.severity
+    });
+
+    throw new ProcessingError(`Failed to process incident alert: ${errorMessage}`);
   }
 }
 
@@ -138,55 +206,97 @@ export async function handleIncidentAlert(alert: IncidentAlert, env: Env): Promi
  * Retrieves incident details from database - Simple agent, SQL storage
  */
 export async function getIncidentDetails(id: string, env: Env): Promise<Incident> {
-  env.logger.debug('Retrieving incident details', { incident_id: id });
+  const startTime = Date.now();
+  const traceId = `get_incident_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
-  const result = await env.INCIDENTS_DATABASE.executeQuery({
-    sqlQuery: `SELECT * FROM incidents WHERE id = '${id.replace(/'/g, "''")}'`
+  env.logger.debug('Starting incident details retrieval', {
+    trace_id: traceId,
+    incident_id: id,
+    request_timestamp: new Date().toISOString()
   });
 
-  if (!result.results) {
-    throw new NotFoundError(`Incident ${id} not found`);
-  }
+  try {
+    const queryStartTime = Date.now();
+    const result = await env.INCIDENTS_DATABASE.executeQuery({
+      sqlQuery: `SELECT * FROM incidents WHERE id = '${id.replace(/'/g, "''")}'`
+    });
+    const queryDuration = Date.now() - queryStartTime;
 
-  // SmartSQL returns results as string, need to parse it
-  let resultsArray: any[] = [];
-  if (typeof result.results === 'string') {
-    try {
-      const parsed = JSON.parse(result.results);
-      resultsArray = Array.isArray(parsed) ? parsed : (parsed.results || []);
-    } catch (e) {
-      env.logger.error('Failed to parse results', { results: result.results });
+    env.logger.debug('Database query completed', {
+      trace_id: traceId,
+      incident_id: id,
+      query_duration_ms: queryDuration,
+      has_results: !!result.results
+    });
+
+    if (!result.results) {
+      env.logger.warn('Incident not found - no results returned', { incident_id: id });
       throw new NotFoundError(`Incident ${id} not found`);
     }
-  } else {
-    resultsArray = Array.isArray(result.results) ? result.results : [];
+
+    // SmartSQL returns results as string, need to parse it
+    let resultsArray: any[] = [];
+    if (typeof result.results === 'string') {
+      try {
+        const parsed = JSON.parse(result.results);
+        resultsArray = Array.isArray(parsed) ? parsed : (parsed.results || []);
+      } catch (e) {
+        env.logger.error('Failed to parse database results', {
+          incident_id: id,
+          results_type: typeof result.results,
+          parse_error: e instanceof Error ? e.message : String(e)
+        });
+        throw new NotFoundError(`Incident ${id} not found - data parsing error`);
+      }
+    } else {
+      resultsArray = Array.isArray(result.results) ? result.results : [];
+    }
+
+    if (resultsArray.length === 0) {
+      env.logger.warn('Incident not found - empty results array', { incident_id: id });
+      throw new NotFoundError(`Incident ${id} not found`);
+    }
+
+    const row = resultsArray[0];
+    const incident: Incident = {
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      severity: row.severity,
+      status: row.status,
+      source: row.source,
+      affected_services: JSON.parse(row.affected_services || '[]'),
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      metadata: JSON.parse(row.metadata || '{}')
+    };
+
+    const totalDuration = Date.now() - startTime;
+    env.logger.info('Incident details retrieved successfully', {
+      incident_id: id,
+      status: incident.status,
+      severity: incident.severity,
+      source: incident.source,
+      total_duration_ms: totalDuration,
+      query_duration_ms: queryDuration
+    });
+
+    return incident;
+
+  } catch (error) {
+    const totalDuration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    env.logger.error('Failed to retrieve incident details', {
+      incident_id: id,
+      error_message: errorMessage,
+      error_type: error instanceof Error ? error.constructor.name : 'Unknown',
+      total_duration_ms: totalDuration
+    });
+
+    // Re-throw the original error (NotFoundError or others)
+    throw error;
   }
-
-  if (resultsArray.length === 0) {
-    throw new NotFoundError(`Incident ${id} not found`);
-  }
-
-  const row = resultsArray[0];
-  const incident: Incident = {
-    id: row.id,
-    title: row.title,
-    description: row.description,
-    severity: row.severity,
-    status: row.status,
-    source: row.source,
-    affected_services: JSON.parse(row.affected_services || '[]'),
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    metadata: JSON.parse(row.metadata || '{}')
-  };
-
-  env.logger.info('Incident details retrieved from database', {
-    incident_id: id,
-    status: incident.status,
-    severity: incident.severity
-  });
-
-  return incident;
 }
 
 /**
@@ -303,15 +413,21 @@ export async function getHealthStatus(env: Env): Promise<{
   checks: Record<string, boolean>;
   cache_size: number;
 }> {
+  const startTime = Date.now();
+  const traceId = `health_check_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+
   try {
+    const queryStartTime = Date.now();
     // Test database connection
     const result = await env.INCIDENTS_DATABASE.executeQuery({
       sqlQuery: 'SELECT COUNT(*) as count FROM incidents'
     });
+    const queryDuration = Date.now() - queryStartTime;
+
     const incidentCount = (result.results?.[0] as any)?.count || 0;
 
-    return {
-      status: 'healthy',
+    const healthStatus = {
+      status: 'healthy' as const,
       checks: {
         database_connection: true,
         incidents_table: result.results !== undefined,
@@ -319,9 +435,24 @@ export async function getHealthStatus(env: Env): Promise<{
       },
       cache_size: incidentCount
     };
+
+    const totalDuration = Date.now() - startTime;
+    env.logger.info('Health check completed successfully', {
+      status: healthStatus.status,
+      incident_count: incidentCount,
+      database_query_duration_ms: queryDuration,
+      total_duration_ms: totalDuration,
+      all_checks_passed: Object.values(healthStatus.checks).every(check => check)
+    });
+
+    return healthStatus;
+
   } catch (error) {
-    return {
-      status: 'degraded',
+    const totalDuration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    const healthStatus = {
+      status: 'degraded' as const,
       checks: {
         database_connection: false,
         incidents_table: false,
@@ -329,6 +460,15 @@ export async function getHealthStatus(env: Env): Promise<{
       },
       cache_size: 0
     };
+
+    env.logger.error('Health check failed - system degraded', {
+      status: healthStatus.status,
+      error_message: errorMessage,
+      error_type: error instanceof Error ? error.constructor.name : 'Unknown',
+      total_duration_ms: totalDuration
+    });
+
+    return healthStatus;
   }
 }
 
@@ -336,44 +476,90 @@ export async function getHealthStatus(env: Env): Promise<{
  * Lists all incidents from SQL database - Simple agent
  */
 export async function listIncidents(env: Env): Promise<Incident[]> {
-  env.logger.info('Retrieving incident list from database');
+  const startTime = Date.now();
+  const traceId = `list_incidents_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
 
-  const result = await env.INCIDENTS_DATABASE.executeQuery({
-    sqlQuery: 'SELECT * FROM incidents ORDER BY created_at DESC'
-  });
+  try {
+    const queryStartTime = Date.now();
+    const result = await env.INCIDENTS_DATABASE.executeQuery({
+      sqlQuery: 'SELECT * FROM incidents ORDER BY created_at DESC'
+    });
+    const queryDuration = Date.now() - queryStartTime;
 
-  if (!result.results) {
-    return [];
-  }
+    env.logger.debug('Database query completed', {
+      query_duration_ms: queryDuration,
+      has_results: !!result.results
+    });
 
-  // SmartSQL returns results as string, need to parse it
-  let resultsArray: any[] = [];
-  if (typeof result.results === 'string') {
-    try {
-      const parsed = JSON.parse(result.results);
-      resultsArray = Array.isArray(parsed) ? parsed : (parsed.results || []);
-    } catch (e) {
-      env.logger.error('Failed to parse results', { results: result.results });
+    if (!result.results) {
+      env.logger.info('No incidents found in database');
       return [];
     }
-  } else {
-    resultsArray = Array.isArray(result.results) ? result.results : [];
+
+    // SmartSQL returns results as string, need to parse it
+    let resultsArray: any[] = [];
+    if (typeof result.results === 'string') {
+      try {
+        const parsed = JSON.parse(result.results);
+        resultsArray = Array.isArray(parsed) ? parsed : (parsed.results || []);
+      } catch (e) {
+        env.logger.error('Failed to parse database results', {
+          parse_error: e instanceof Error ? e.message : String(e),
+          results_type: typeof result.results
+        });
+        return [];
+      }
+    } else {
+      resultsArray = Array.isArray(result.results) ? result.results : [];
+    }
+
+    const incidentList = resultsArray.map((row: any) => ({
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      severity: row.severity,
+      status: row.status,
+      source: row.source,
+      affected_services: JSON.parse(row.affected_services || '[]'),
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      metadata: JSON.parse(row.metadata || '{}')
+    }));
+
+    const totalDuration = Date.now() - startTime;
+
+    // Log severity and status distribution
+    const severityCounts = incidentList.reduce((acc, incident) => {
+      acc[incident.severity] = (acc[incident.severity] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const statusCounts = incidentList.reduce((acc, incident) => {
+      acc[incident.status] = (acc[incident.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    env.logger.info('Incident list retrieval completed successfully', {
+      total_incidents: incidentList.length,
+      query_duration_ms: queryDuration,
+      total_duration_ms: totalDuration,
+      severity_distribution: severityCounts,
+      status_distribution: statusCounts
+    });
+
+    return incidentList;
+
+  } catch (error) {
+    const totalDuration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    env.logger.error('Failed to retrieve incident list', {
+      error_message: errorMessage,
+      error_type: error instanceof Error ? error.constructor.name : 'Unknown',
+      total_duration_ms: totalDuration
+    });
+
+    // Return empty list on error, but log the failure
+    return [];
   }
-
-  const incidentList = resultsArray.map((row: any) => ({
-    id: row.id,
-    title: row.title,
-    description: row.description,
-    severity: row.severity,
-    status: row.status,
-    source: row.source,
-    affected_services: JSON.parse(row.affected_services || '[]'),
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    metadata: JSON.parse(row.metadata || '{}')
-  }));
-
-  env.logger.info(`Retrieved ${incidentList.length} incidents from database`);
-
-  return incidentList;
 }
