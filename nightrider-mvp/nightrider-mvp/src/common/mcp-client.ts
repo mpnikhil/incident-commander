@@ -74,13 +74,23 @@ export class McpClientManager {
   private initializeAvailableTools() {
     this.availableTools.set('mapping-mcp', [
       {
+        name: 'get-service-guidelines',
+        description: 'Get comprehensive service inventory, mapping rules, and safety guidelines',
+        parameters: ['includeRules']
+      },
+      {
         name: 'map-alert-to-service',
-        description: 'Map alert types to service information',
+        description: 'Map alert types to service information and identify affected components',
         parameters: ['alertType', 'incidentTitle', 'incidentDescription']
       },
       {
         name: 'get-runbook',
-        description: 'Get runbook content for a service',
+        description: 'Get detailed runbook content and procedures for a service',
+        parameters: ['serviceName', 'incidentType']
+      },
+      {
+        name: 'identify-dependencies',
+        description: 'Identify service dependencies and impact analysis',
         parameters: ['serviceName', 'incidentType']
       }
     ]);
@@ -88,17 +98,27 @@ export class McpClientManager {
     this.availableTools.set('observability-mcp', [
       {
         name: 'get-logs',
-        description: 'Retrieve logs for a service',
+        description: 'Retrieve logs for a service with AI-powered analysis',
         parameters: ['serviceName', 'timeRange', 'incidentType']
       },
       {
         name: 'get-metrics',
-        description: 'Retrieve metrics for a service',
+        description: 'Retrieve metrics and health status for a service',
         parameters: ['serviceName', 'incidentType']
       },
       {
         name: 'get-dashboard-data',
-        description: 'Get dashboard data for monitoring',
+        description: 'Get comprehensive dashboard data and monitoring insights',
+        parameters: ['serviceName', 'timeRange']
+      },
+      {
+        name: 'analyze-trends',
+        description: 'Analyze performance trends and anomalies',
+        parameters: ['serviceName', 'timeRange', 'metricType']
+      },
+      {
+        name: 'check-alerts',
+        description: 'Check for related alerts and incidents',
         parameters: ['serviceName', 'timeRange']
       }
     ]);
@@ -106,18 +126,33 @@ export class McpClientManager {
     this.availableTools.set('remediation-mcp', [
       {
         name: 'restart-pod',
-        description: 'Restart a pod (use with caution)',
+        description: 'Restart a pod (use with extreme caution)',
         parameters: ['podName', 'namespace', 'incidentType', 'reason']
       },
       {
         name: 'send-notification',
-        description: 'Send notification to team',
+        description: 'Send notification to team with AI-enhanced content',
         parameters: ['message', 'severity', 'channel', 'incidentType', 'serviceName']
       },
       {
         name: 'scale-service',
-        description: 'Scale a service up or down',
+        description: 'Scale a service up or down based on demand',
         parameters: ['serviceName', 'namespace', 'replicas']
+      },
+      {
+        name: 'rollback-deployment',
+        description: 'Rollback to previous deployment version',
+        parameters: ['serviceName', 'namespace', 'reason']
+      },
+      {
+        name: 'enable-circuit-breaker',
+        description: 'Enable circuit breaker to prevent cascade failures',
+        parameters: ['serviceName', 'namespace', 'reason']
+      },
+      {
+        name: 'create-incident-ticket',
+        description: 'Create a formal incident ticket for tracking',
+        parameters: ['title', 'description', 'severity', 'assignee']
       }
     ]);
   }

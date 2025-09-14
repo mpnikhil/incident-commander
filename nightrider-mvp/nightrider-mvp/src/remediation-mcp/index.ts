@@ -9,6 +9,119 @@ export const implementation = {
 }
 
 export default async (server: McpServer, env: Env, state: ActorState) => {
+  // Tool: Get comprehensive remediation guidelines and safety rules
+  server.tool("get-remediation-guidelines", {
+    includeSafetyRules: z.boolean().optional().describe("Include detailed safety rules and guidelines")
+  }, async ({ includeSafetyRules = true }, extra) => {
+    env.logger.info('Providing remediation guidelines', { includeSafetyRules });
+
+    const guidelines = {
+      safetyRules: {
+        "critical_services": {
+          services: ["postgres-primary", "user-api"],
+          restrictions: ["NO restart-pod", "NO rollback-deployment", "NO scale-service"],
+          allowedActions: ["send-notification", "create-incident-ticket"],
+          escalationRequired: true
+        },
+        "database_services": {
+          services: ["postgres-primary", "mysql-primary", "mongodb-primary"],
+          restrictions: ["NO restart-pod", "NO rollback-deployment", "NO scale-service"],
+          allowedActions: ["send-notification", "create-incident-ticket"],
+          warning: "Database services require manual intervention"
+        },
+        "high_risk_actions": {
+          actions: ["rollback-deployment", "enable-circuit-breaker", "restart-pod"],
+          conditions: ["Requires approval for critical services", "Check dependencies first"],
+          safetyChecks: ["Verify no data loss", "Check service dependencies", "Confirm rollback plan"]
+        },
+        "autonomous_safe_actions": {
+          actions: ["send-notification", "scale-service", "get-logs", "get-metrics"],
+          conditions: ["Service is not critical", "No database dependencies"],
+          safetyLevel: "low"
+        }
+      },
+      actionGuidelines: {
+        "restart-pod": {
+          safetyLevel: "medium",
+          prerequisites: ["Verify service is not critical", "Check for data loss risk"],
+          safeFor: ["user-api", "analytics-worker", "redis-cache", "nginx-proxy"],
+          unsafeFor: ["postgres-primary", "mysql-primary", "mongodb-primary"],
+          bestPractices: ["Use rolling restart", "Check dependencies", "Monitor after restart"]
+        },
+        "scale-service": {
+          safetyLevel: "low",
+          prerequisites: ["Check resource availability", "Verify scaling limits"],
+          safeFor: ["user-api", "analytics-worker", "redis-cache", "nginx-proxy"],
+          unsafeFor: ["postgres-primary"],
+          bestPractices: ["Scale gradually", "Monitor resource usage", "Set reasonable limits"]
+        },
+        "rollback-deployment": {
+          safetyLevel: "high",
+          prerequisites: ["Verify rollback target", "Check data compatibility", "Get approval"],
+          safeFor: ["user-api", "analytics-worker", "nginx-proxy"],
+          unsafeFor: ["postgres-primary", "mysql-primary", "mongodb-primary"],
+          bestPractices: ["Test rollback plan", "Backup current state", "Monitor during rollback"]
+        },
+        "send-notification": {
+          safetyLevel: "low",
+          prerequisites: ["Verify recipients", "Check notification content"],
+          safeFor: ["all-services"],
+          bestPractices: ["Include relevant details", "Set appropriate urgency", "Follow escalation procedures"]
+        },
+        "enable-circuit-breaker": {
+          safetyLevel: "high",
+          prerequisites: ["Verify circuit breaker configuration", "Check service dependencies"],
+          safeFor: ["user-api", "analytics-worker"],
+          unsafeFor: ["postgres-primary", "mysql-primary"],
+          bestPractices: ["Test circuit breaker", "Monitor fallback behavior", "Set appropriate thresholds"]
+        }
+      },
+      escalationProcedures: {
+        "critical_incident": {
+          contacts: ["sre-oncall@company.com", "engineering-manager@company.com"],
+          channels: ["#incidents", "#sre-alerts"],
+          timeline: "Immediate notification required"
+        },
+        "database_incident": {
+          contacts: ["database-team@company.com", "sre-oncall@company.com"],
+          channels: ["#database-alerts", "#incidents"],
+          timeline: "Immediate notification required"
+        },
+        "high_severity": {
+          contacts: ["sre-oncall@company.com"],
+          channels: ["#sre-alerts"],
+          timeline: "Notification within 5 minutes"
+        },
+        "medium_severity": {
+          contacts: ["sre-team@company.com"],
+          channels: ["#sre-alerts"],
+          timeline: "Notification within 15 minutes"
+        }
+      },
+      riskAssessment: {
+        "low_risk": {
+          actions: ["send-notification", "get-logs", "get-metrics"],
+          conditions: ["Non-critical service", "No data loss risk", "Reversible action"]
+        },
+        "medium_risk": {
+          actions: ["restart-pod", "scale-service"],
+          conditions: ["Service has dependencies", "Potential temporary impact", "Reversible with effort"]
+        },
+        "high_risk": {
+          actions: ["rollback-deployment", "enable-circuit-breaker"],
+          conditions: ["Critical service", "Potential data loss", "Requires approval"]
+        }
+      }
+    };
+
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify(guidelines, null, 2)
+      }]
+    };
+  });
+
   // Tool: Restart a pod with AI decision making
   server.tool("restart-pod", {
     podName: z.string().describe("Name of the pod to restart"),

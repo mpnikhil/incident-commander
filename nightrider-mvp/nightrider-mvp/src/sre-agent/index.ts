@@ -159,7 +159,7 @@ export default class extends Service<Env> {
       const toolsDescription = this.formatToolsForAI(availableTools);
       const alertType = this.determineAlertType(incident.title, incident.description);
       
-      // AI Planning - decide which tools to use
+      // AI Planning - decide which tools to use (TRULY AUTONOMOUS)
       const planningPrompt = `You are an autonomous SRE agent. Analyze this incident and create a plan.
 
 INCIDENT:
@@ -171,19 +171,50 @@ Alert Type: ${alertType}
 AVAILABLE TOOLS:
 ${toolsDescription}
 
-Create a JSON plan with:
+SRE GUIDELINES & SAFETY RULES:
+- CRITICAL SERVICES: postgres-primary, user-api (NO restart-pod, NO rollback-deployment, NO scale-service)
+- DATABASE SERVICES: postgres-primary, mysql-primary, mongodb-primary (Manual intervention only)
+- HIGH RISK ACTIONS: rollback-deployment, enable-circuit-breaker, restart-pod (Requires approval for critical services)
+- SAFE AUTONOMOUS ACTIONS: send-notification, scale-service, get-logs, get-metrics (Low risk)
+- SERVICE TYPES: user-api (frontend), postgres-primary (database), analytics-worker (background), redis-cache (cache), nginx-proxy (load-balancer)
+
+TOOL SELECTION STRATEGY:
+1. For OOM issues: Use get-logs, get-metrics, restart-pod (if not critical service)
+2. For database issues: Use get-logs, send-notification (NO autonomous actions)
+3. For high CPU: Use get-metrics, analyze-trends, scale-service (if not database)
+4. For network issues: Use get-logs, check-alerts, send-notification
+5. Always map alert to service first to understand context
+6. Check service criticality before taking any actions
+7. Use runbooks for complex incidents
+
+You have complete freedom to choose which tools to use. Create a JSON plan with:
+
 {
   "analysis_phase": [
-    {"service": "mapping-mcp", "tool": "map-alert-to-service", "reason": "why this tool is needed", "args": {"alertType": "${alertType}", "incidentTitle": "${incident.title}", "incidentDescription": "${incident.description || ''}"}},
-    {"service": "observability-mcp", "tool": "get-logs", "reason": "why this tool is needed", "args": {"serviceName": "TBD", "timeRange": "1h", "incidentType": "${alertType}"}}
+    // Choose ANY tools from the available tools that you think are needed for analysis
+    // You can use 0, 1, or many tools - it's your decision
+    // Examples: map-alert-to-service, get-logs, get-metrics, get-dashboard-data, get-runbook
   ],
   "action_phase": [
-    {"service": "remediation-mcp", "tool": "send-notification", "reason": "why this action is needed", "args": {"message": "Incident detected", "severity": "${incident.severity}", "channel": "sre-alerts", "incidentType": "${alertType}", "serviceName": "TBD"}}
+    // Choose ANY tools from the available tools that you think are needed for actions
+    // You can use 0, 1, or many tools - it's your decision
+    // Examples: restart-pod, send-notification, scale-service
   ],
-  "reasoning": "Overall strategy and approach"
+  "reasoning": "Explain your overall strategy and why you chose these specific tools"
 }
 
-Only include tools that are actually needed for this specific incident.`;
+IMPORTANT RULES:
+1. You have COMPLETE FREEDOM to choose any combination of tools
+2. You can choose NO tools if you think none are needed
+3. You can choose tools in any order
+4. You can choose tools from any service
+5. Only choose tools that are actually useful for this specific incident
+6. Think strategically about what information you need before taking actions
+7. ALWAYS consider service criticality and safety rules
+8. For database incidents, prefer notifications over autonomous actions
+9. For critical services, be extra cautious with actions
+
+Be creative and strategic in your tool selection while following safety guidelines!`;
 
       const planningResponse = await this.callAIWithRetry([
         { role: 'system', content: 'You are an expert SRE agent that plans incident response strategies.' },
@@ -246,6 +277,20 @@ Only include tools that are actually needed for this specific incident.`;
     
     for (const tool of analysisTools) {
       try {
+        // Safety check for analysis tools
+        const safetyCheck = this.checkToolSafety(tool, incident);
+        if (!safetyCheck.safe) {
+          this.env.logger.warn(`Skipping unsafe analysis tool: ${tool.service}.${tool.tool}`, { 
+            traceId, 
+            reason: safetyCheck.reason 
+          });
+          results[`${tool.service}_${tool.tool}`] = { 
+            error: `Safety check failed: ${safetyCheck.reason}`,
+            skipped: true
+          };
+          continue;
+        }
+
         this.env.logger.info(`Executing analysis tool: ${tool.service}.${tool.tool}`, { traceId, reason: tool.reason });
         
         const result = await mcpClient.executeTool(tool.service, tool.tool, tool.args);
@@ -272,6 +317,21 @@ Only include tools that are actually needed for this specific incident.`;
     
     for (const tool of actionTools) {
       try {
+        // Safety check for action tools (more strict than analysis)
+        const safetyCheck = this.checkToolSafety(tool, incident);
+        if (!safetyCheck.safe) {
+          this.env.logger.warn(`Skipping unsafe action tool: ${tool.service}.${tool.tool}`, { 
+            traceId, 
+            reason: safetyCheck.reason 
+          });
+          results[`${tool.service}_${tool.tool}`] = { 
+            error: `Safety check failed: ${safetyCheck.reason}`,
+            skipped: true
+          };
+          actionsTaken.push(`${tool.tool} skipped: ${safetyCheck.reason}`);
+          continue;
+        }
+
         this.env.logger.info(`Executing action tool: ${tool.service}.${tool.tool}`, { traceId, reason: tool.reason });
         
         // Update args with data from analysis phase
@@ -338,21 +398,31 @@ ${JSON.stringify(analysisResults, null, 2)}
 ACTION RESULTS:
 ${JSON.stringify(actionResults, null, 2)}
 
+SRE GUIDELINES & SAFETY RULES:
+- CRITICAL SERVICES: postgres-primary, user-api (NO restart-pod, NO rollback-deployment, NO scale-service)
+- DATABASE SERVICES: postgres-primary, mysql-primary, mongodb-primary (Manual intervention only)
+- HIGH RISK ACTIONS: rollback-deployment, enable-circuit-breaker, restart-pod (Requires approval)
+- SAFE AUTONOMOUS ACTIONS: send-notification, scale-service, get-logs, get-metrics
+
 Provide a comprehensive analysis including:
 1. Root cause analysis
 2. Actions taken and their effectiveness
-3. Recommendations for prevention
-4. Overall incident resolution status
+3. Safety compliance assessment
+4. Recommendations for prevention
+5. Overall incident resolution status
 
 Return JSON with:
 {
   "incident_type": "string",
   "root_cause_analysis": "detailed analysis",
+  "autonomous_action_safe": true/false,
+  "recommended_action": "What should be done next",
   "actions_effectiveness": "assessment of actions taken",
+  "safety_compliance": "assessment of safety rules compliance",
   "recommendations": ["prevention recommendations"],
   "resolution_status": "resolved|partial|failed",
   "confidence_score": 0.0-1.0,
-  "reasoning": "overall reasoning"
+  "reasoning": "overall reasoning including safety considerations"
 }`;
 
     const finalResponse = await this.callAIWithRetry([
@@ -361,6 +431,46 @@ Return JSON with:
     ], 800, 0.3);
 
     return this.parseAIResponse(finalResponse);
+  }
+
+  // Safety check for tool execution
+  private checkToolSafety(tool: any, incident: any): { safe: boolean; reason?: string } {
+    const criticalServices = ['postgres-primary', 'user-api'];
+    const databaseServices = ['postgres-primary', 'mysql-primary', 'mongodb-primary'];
+    const highRiskActions = ['restart-pod', 'rollback-deployment', 'enable-circuit-breaker'];
+    
+    // Check if tool is high risk
+    if (highRiskActions.includes(tool.tool)) {
+      // Check if incident involves critical services
+      const incidentText = `${incident.title} ${incident.description}`.toLowerCase();
+      const involvesCriticalService = criticalServices.some(service => 
+        incidentText.includes(service) || incidentText.includes('database')
+      );
+      
+      if (involvesCriticalService) {
+        return { 
+          safe: false, 
+          reason: `High risk action '${tool.tool}' not allowed for critical services` 
+        };
+      }
+    }
+    
+    // Check for database-specific restrictions
+    if (tool.tool === 'restart-pod' || tool.tool === 'scale-service') {
+      const incidentText = `${incident.title} ${incident.description}`.toLowerCase();
+      const involvesDatabase = databaseServices.some(service => 
+        incidentText.includes(service) || incidentText.includes('database')
+      );
+      
+      if (involvesDatabase) {
+        return { 
+          safe: false, 
+          reason: `Action '${tool.tool}' not allowed for database services` 
+        };
+      }
+    }
+    
+    return { safe: true };
   }
 
   // Helper methods
