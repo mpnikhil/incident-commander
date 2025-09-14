@@ -16,6 +16,7 @@ import {
 } from '../types/shared';
 import { Env } from './raindrop.gen';
 import { RemediationResult } from './model';
+// Using fetch for Slack API calls since Web API client has Node.js dependencies
 
 /**
  * Retry helper function for database operations with comprehensive logging
@@ -159,6 +160,9 @@ export async function handleIncidentAlert(alert: IncidentAlert, env: Env): Promi
       incident_id: incidentId,
       processing_duration_ms: processingDuration
     });
+
+    // Send Slack notification if configured
+    await sendIncidentNotificationToSlack(alert, incidentId, env);
 
     const result: ProcessingResult = {
       status: 'success',
@@ -561,5 +565,259 @@ export async function listIncidents(env: Env): Promise<Incident[]> {
 
     // Return empty list on error, but log the failure
     return [];
+  }
+}
+
+/**
+ * Sends a Slack message using the Slack Web API client
+ */
+export async function sendSlackMessage(
+  message: string,
+  config: { signingSecret: string; token: string; channel: string },
+  env: Env
+): Promise<void> {
+  const startTime = Date.now();
+  const traceId = `slack_message_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+
+  env.logger.info('Sending Slack message', {
+    trace_id: traceId,
+    channel: config.channel,
+    message_length: message.length
+  });
+
+  try {
+    // Use fetch to call Slack API directly (compatible with Cloudflare Workers)
+    const response = await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        channel: config.channel,
+        text: message
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const result = await response.json() as { ok: boolean; error?: string; ts?: string };
+    const duration = Date.now() - startTime;
+
+    if (result.ok) {
+      env.logger.info('Slack message sent successfully', {
+        trace_id: traceId,
+        channel: config.channel,
+        duration_ms: duration,
+        message_ts: result.ts
+      });
+    } else {
+      throw new Error(`Slack API error: ${result.error}`);
+    }
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    env.logger.error('Failed to send Slack message', {
+      trace_id: traceId,
+      error_message: errorMessage,
+      error_type: error instanceof Error ? error.constructor.name : 'Unknown',
+      duration_ms: duration,
+      channel: config.channel
+    });
+
+    throw new ProcessingError(`Failed to send Slack message: ${errorMessage}`);
+  }
+}
+
+/**
+ * Updates Slack configuration by storing it in the database
+ * Note: In production, this would ideally update environment variables or a secure config store
+ */
+export async function updateSlackConfig(
+  config: { signingSecret: string; botToken: string; channel: string },
+  env: Env
+): Promise<void> {
+  const startTime = Date.now();
+  const traceId = `update_slack_config_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+
+  env.logger.info('Updating Slack configuration', {
+    trace_id: traceId,
+    channel: config.channel
+  });
+
+  try {
+    // Create configuration table if not exists
+    await retryOperation(async () => {
+      await env.INCIDENTS_DATABASE.executeQuery({
+        sqlQuery: `CREATE TABLE IF NOT EXISTS slack_config (
+          id INTEGER PRIMARY KEY DEFAULT 1,
+          signing_secret TEXT NOT NULL,
+          bot_token TEXT NOT NULL,
+          channel TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )`
+      });
+    }, 3, env.logger, 'create_slack_config_table');
+
+    // Upsert configuration
+    const now = new Date().toISOString();
+    const escapedSigningSecret = config.signingSecret.replace(/'/g, "''");
+    const escapedBotToken = config.botToken.replace(/'/g, "''");
+    const escapedChannel = config.channel.replace(/'/g, "''");
+
+    await retryOperation(async () => {
+      await env.INCIDENTS_DATABASE.executeQuery({
+        sqlQuery: `INSERT OR REPLACE INTO slack_config (
+          id, signing_secret, bot_token, channel, updated_at
+        ) VALUES (
+          1, '${escapedSigningSecret}', '${escapedBotToken}', '${escapedChannel}', '${now}'
+        )`
+      });
+    }, 3, env.logger, 'upsert_slack_config');
+
+    const duration = Date.now() - startTime;
+
+    env.logger.info('Slack configuration updated successfully', {
+      trace_id: traceId,
+      channel: config.channel,
+      duration_ms: duration
+    });
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    env.logger.error('Failed to update Slack configuration', {
+      trace_id: traceId,
+      error_message: errorMessage,
+      error_type: error instanceof Error ? error.constructor.name : 'Unknown',
+      duration_ms: duration
+    });
+
+    throw new ProcessingError(`Failed to update Slack configuration: ${errorMessage}`);
+  }
+}
+
+/**
+ * Gets stored Slack configuration from database as fallback when env vars not set
+ */
+export async function getStoredSlackConfig(env: Env): Promise<{ signingSecret: string; botToken: string; channel: string } | null> {
+  try {
+    const result = await env.INCIDENTS_DATABASE.executeQuery({
+      sqlQuery: `SELECT signing_secret, bot_token, channel FROM slack_config WHERE id = 1`
+    });
+
+    if (!result.results) {
+      return null;
+    }
+
+    // SmartSQL returns results as string, need to parse it
+    let resultsArray: any[] = [];
+    if (typeof result.results === 'string') {
+      try {
+        const parsed = JSON.parse(result.results);
+        resultsArray = Array.isArray(parsed) ? parsed : (parsed.results || []);
+      } catch (e) {
+        return null;
+      }
+    } else {
+      resultsArray = Array.isArray(result.results) ? result.results : [];
+    }
+
+    if (resultsArray.length === 0) {
+      return null;
+    }
+
+    const row = resultsArray[0];
+    return {
+      signingSecret: row.signing_secret,
+      botToken: row.bot_token,
+      channel: row.channel
+    };
+
+  } catch (error) {
+    env.logger.warn('Failed to get stored Slack configuration', {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  }
+}
+
+/**
+ * Sends automatic Slack notification when a new incident is created
+ */
+async function sendIncidentNotificationToSlack(
+  alert: IncidentAlert,
+  incidentId: string,
+  env: Env
+): Promise<void> {
+  try {
+    // Check if Slack is configured via environment variables
+    let config = {
+      signingSecret: env.SLACK_SIGNING_SECRET,
+      token: env.SLACK_BOT_TOKEN,
+      channel: env.SLACK_CHANNEL
+    };
+
+    // If not configured via env vars, try to get from database
+    if (!config.signingSecret || !config.token || !config.channel) {
+      const storedConfig = await getStoredSlackConfig(env);
+      if (storedConfig) {
+        config = {
+          signingSecret: storedConfig.signingSecret,
+          token: storedConfig.botToken,
+          channel: storedConfig.channel
+        };
+      } else {
+        env.logger.debug('Slack not configured, skipping incident notification', {
+          incident_id: incidentId
+        });
+        return;
+      }
+    }
+
+    // Format incident notification message
+    const severityEmoji = {
+      'P0': '🚨',
+      'P1': '⚠️',
+      'P2': '⚡',
+      'P3': '💡'
+    }[alert.severity] || '📢';
+
+    const affectedServices = alert.affected_services.join(', ');
+
+    const message = `${severityEmoji} **NEW INCIDENT ALERT** ${severityEmoji}
+
+**Incident ID:** ${incidentId}
+**Severity:** ${alert.severity}
+**Source:** ${alert.source}
+**Type:** ${alert.alert_type}
+**Affected Services:** ${affectedServices}
+
+**Message:** ${alert.message}
+
+**Timestamp:** ${alert.timestamp}
+
+_This incident has been automatically logged and analysis is starting._`;
+
+    // Send the notification
+    await sendSlackMessage(message, config, env);
+
+    env.logger.info('Incident notification sent to Slack', {
+      incident_id: incidentId,
+      severity: alert.severity,
+      channel: env.SLACK_CHANNEL
+    });
+
+  } catch (error) {
+    // Don't fail the incident creation if Slack notification fails
+    env.logger.warn('Failed to send incident notification to Slack', {
+      incident_id: incidentId,
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 }

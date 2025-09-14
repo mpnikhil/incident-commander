@@ -77,6 +77,18 @@ export default class extends Service<Env> {
         return await this.getHealthStatus(corsHeaders);
       }
 
+      if (method === 'POST' && path === '/api/slack/message') {
+        return await this.sendSlackMessage(request, corsHeaders);
+      }
+
+      if (method === 'POST' && path === '/api/slack/config') {
+        return await this.updateSlackConfig(request, corsHeaders);
+      }
+
+      if (method === 'GET' && path === '/api/slack/config') {
+        return await this.getSlackConfig(corsHeaders);
+      }
+
       // Route not found
       return this.createErrorResponse(404, 'Route not found', corsHeaders);
 
@@ -325,6 +337,136 @@ export default class extends Service<Env> {
       });
 
       return this.createErrorResponse(500, 'Failed to list incidents', corsHeaders);
+    }
+  }
+
+  /**
+   * Handles POST /api/slack/message - Send Slack message
+   */
+  private async sendSlackMessage(request: Request, corsHeaders: Headers): Promise<Response> {
+    try {
+      // Parse request body
+      const body = await this.parseJSONBody(request);
+      if (!body) {
+        return this.createErrorResponse(400, 'Request body must be valid JSON', corsHeaders);
+      }
+
+      // Validate required fields
+      const validationResult = Model.validateJSONPayload(body, ['message']);
+      if (!validationResult.isValid) {
+        return this.createErrorResponse(400, 'Missing required "message" field', corsHeaders, validationResult.errors);
+      }
+
+      // Get Slack configuration from environment
+      const slackConfig = {
+        signingSecret: this.env.SLACK_SIGNING_SECRET,
+        token: this.env.SLACK_BOT_TOKEN,
+        channel: this.env.SLACK_CHANNEL
+      };
+
+      // Validate Slack configuration
+      if (!slackConfig.signingSecret || !slackConfig.token || !slackConfig.channel) {
+        return this.createErrorResponse(500, 'Slack configuration incomplete. Please configure SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN, and SLACK_CHANNEL', corsHeaders);
+      }
+
+      // Send message through controller
+      const result = await Controller.sendSlackMessage(body.message, slackConfig, this.env);
+
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'Slack message sent successfully',
+        timestamp: new Date().toISOString(),
+        channel: slackConfig.channel
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...Object.fromEntries(corsHeaders)
+        }
+      });
+
+    } catch (error) {
+      this.env.logger.error('Error sending Slack message', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+
+      return this.createErrorResponse(500, 'Failed to send Slack message', corsHeaders);
+    }
+  }
+
+  /**
+   * Handles POST /api/slack/config - Update Slack configuration
+   */
+  private async updateSlackConfig(request: Request, corsHeaders: Headers): Promise<Response> {
+    try {
+      // Parse request body
+      const body = await this.parseJSONBody(request);
+      if (!body) {
+        return this.createErrorResponse(400, 'Request body must be valid JSON', corsHeaders);
+      }
+
+      // Validate required fields
+      const validationResult = Model.validateJSONPayload(body, ['signingSecret', 'botToken', 'channel']);
+      if (!validationResult.isValid) {
+        return this.createErrorResponse(400, 'Missing required Slack configuration fields', corsHeaders, validationResult.errors);
+      }
+
+      // Update configuration through controller
+      const result = await Controller.updateSlackConfig({
+        signingSecret: body.signingSecret,
+        botToken: body.botToken,
+        channel: body.channel
+      }, this.env);
+
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'Slack configuration updated successfully',
+        timestamp: new Date().toISOString()
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...Object.fromEntries(corsHeaders)
+        }
+      });
+
+    } catch (error) {
+      this.env.logger.error('Error updating Slack configuration', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+
+      return this.createErrorResponse(500, 'Failed to update Slack configuration', corsHeaders);
+    }
+  }
+
+  /**
+   * Handles GET /api/slack/config - Get current Slack configuration status
+   */
+  private async getSlackConfig(corsHeaders: Headers): Promise<Response> {
+    try {
+      const isConfigured = !!(this.env.SLACK_BOT_TOKEN && this.env.SLACK_CHANNEL && this.env.SLACK_SIGNING_SECRET);
+
+      return new Response(JSON.stringify({
+        configured: isConfigured,
+        channel: isConfigured ? this.env.SLACK_CHANNEL : null,
+        // Don't expose secrets, just indicate if they're set
+        hasSigningSecret: !!this.env.SLACK_SIGNING_SECRET,
+        hasBotToken: !!this.env.SLACK_BOT_TOKEN,
+        timestamp: new Date().toISOString()
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...Object.fromEntries(corsHeaders)
+        }
+      });
+
+    } catch (error) {
+      this.env.logger.error('Error getting Slack configuration', {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+
+      return this.createErrorResponse(500, 'Failed to get Slack configuration', corsHeaders);
     }
   }
 

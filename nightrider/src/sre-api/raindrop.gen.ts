@@ -12,5 +12,8 @@ export interface Env {
   INCIDENTS_DATABASE: SmartSql;
   KNOWLEDGE_BASE: SmartBucket;
   logger: Logger;
+  SLACK_BOT_TOKEN: string;
+  SLACK_CHANNEL: string;
+  SLACK_SIGNING_SECRET: string;
   tracer: Tracer;
 }
