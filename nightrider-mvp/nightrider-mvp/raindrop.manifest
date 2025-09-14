@@ -3,32 +3,20 @@ application "nightrider-mvp" {
 
   service "sre-agent" {
     visibility = "public"
-    domain {
-      cname = "nightrider-sre-agent"
-    }
   }
 
   mcp_service "remediation-mcp" {
     visibility = "protected"
     authorization_server = "https://authkit.liquidmetal.run"
-    domain {
-      cname = "nightrider-remediation-mcp"
-    }
   }
 
   mcp_service "mapping-mcp" {
     visibility = "protected"
     authorization_server = "https://authkit.liquidmetal.run"
-    domain {
-      cname = "nightrider-mapping-mcp"
-    }
   }
 
   mcp_service "observability-mcp" {
     visibility = "protected"
     authorization_server = "https://authkit.liquidmetal.run"
-    domain {
-      cname = "nightrider-observability-mcp"
-    }
   }
 }

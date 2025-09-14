@@ -5,7 +5,7 @@
 
 set -e
 
-BASE_URL="https://svc-01k54nm1980j3wxq36g0x10f6b.01k1v9y078eahcz45grz0g76p0.lmapp.run"
+BASE_URL="https://svc-01k54pk6n30e51rhg5tcaxf49t.01k1v9y078eahcz45grz0g76p0.lmapp.run"
 TEMP_DIR=$(mktemp -d)
 INCIDENT_IDS=()
 

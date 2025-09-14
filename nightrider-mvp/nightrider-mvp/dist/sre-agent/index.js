@@ -1,4 +1,4 @@
-globalThis.__RAINDROP_GIT_COMMIT_SHA = "4e8207aa155dea03be75a7ecdeaa602876c618b3";
+globalThis.__RAINDROP_GIT_COMMIT_SHA = "bad785ec7992d9b71197b41578d4d1ce5d7e0e61";
 
 // src/sre-agent/index.ts
 import { Service } from "./runtime.js";
@@ -1624,20 +1624,33 @@ var sre_agent_default = class extends Service {
           incident.created_at,
           incident.updated_at
         ).run();
-        this.env.logger.info("Incident created, starting GPT analysis", {
+        this.env.logger.info("Incident created, starting SYNC GPT analysis", {
           traceId,
           incidentId: incident?.id,
           severity,
           duration: Date.now() - startTime
         });
-        this.analyzeIncident(this.env, incident, traceId).catch((error) => {
-          this.env.logger.error("GPT analysis failed", { traceId, error: error.message });
-        });
-        return c.json({
-          incident,
-          traceId,
-          message: "Incident created, analysis in progress"
-        });
+        try {
+          await this.analyzeIncident(this.env, incident, traceId);
+          return c.json({
+            incident,
+            traceId,
+            message: "Incident created and analyzed successfully"
+          });
+        } catch (error) {
+          this.env.logger.error("SYNC GPT analysis failed in main handler", {
+            traceId,
+            error: error.message,
+            stack: error.stack,
+            incidentId: incident?.id
+          });
+          return c.json({
+            incident,
+            traceId,
+            message: "Incident created but analysis failed",
+            error: error.message
+          });
+        }
       } catch (error) {
         this.env.logger.error("Incident creation failed", {
           traceId,
@@ -1692,6 +1705,7 @@ var sre_agent_default = class extends Service {
     });
     try {
       await env.INCIDENTS_DB.prepare("UPDATE incidents SET status = ?, updated_at = ? WHERE id = ?").bind("analyzing", (/* @__PURE__ */ new Date()).toISOString(), incident.id).run();
+      env.logger.info("About to call AI service", { traceId, model: "gpt-oss-120b" });
       const gptResponse = await env.AI.run("gpt-oss-120b", {
         model: "gpt-oss-120b",
         messages: [
@@ -1782,6 +1796,8 @@ Perform root cause analysis and determine if autonomous action is safe.`
         traceId,
         incidentId: incident.id,
         error: error.message,
+        stack: error.stack,
+        errorName: error.name,
         duration: Date.now() - analysisStart
       });
       await env.INCIDENTS_DB.prepare("UPDATE incidents SET status = ?, updated_at = ?, rca_analysis = ? WHERE id = ?").bind("failed", (/* @__PURE__ */ new Date()).toISOString(), JSON.stringify({ error: error.message }), incident.id).run();

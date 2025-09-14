@@ -1,4 +1,4 @@
-globalThis.__RAINDROP_GIT_COMMIT_SHA = "4e8207aa155dea03be75a7ecdeaa602876c618b3";
+globalThis.__RAINDROP_GIT_COMMIT_SHA = "bad785ec7992d9b71197b41578d4d1ce5d7e0e61";
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)

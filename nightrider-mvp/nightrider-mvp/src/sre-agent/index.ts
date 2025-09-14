@@ -54,23 +54,35 @@ export default class extends Service<Env> {
                 incident.severity, incident.trace_id, incident.created_at, incident.updated_at)
           .run();
 
-        this.env.logger.info('Incident created, starting GPT analysis', {
+        this.env.logger.info('Incident created, starting SYNC GPT analysis', {
           traceId,
           incidentId: incident?.id,
           severity,
           duration: Date.now() - startTime
         });
 
-        // Start GPT analysis workflow (non-blocking)
-        this.analyzeIncident(this.env, incident!, traceId).catch(error => {
-          this.env.logger.error('GPT analysis failed', { traceId, error: error.message });
-        });
-
-        return c.json({
-          incident: incident,
-          traceId,
-          message: 'Incident created, analysis in progress'
-        });
+        // Start GPT analysis workflow (SYNCHRONOUS for debugging)
+        try {
+          await this.analyzeIncident(this.env, incident!, traceId);
+          return c.json({
+            incident: incident,
+            traceId,
+            message: 'Incident created and analyzed successfully'
+          });
+        } catch (error: any) {
+          this.env.logger.error('SYNC GPT analysis failed in main handler', {
+            traceId,
+            error: error.message,
+            stack: error.stack,
+            incidentId: incident?.id
+          });
+          return c.json({
+            incident: incident,
+            traceId,
+            message: 'Incident created but analysis failed',
+            error: error.message
+          });
+        }
 
       } catch (error: any) {
         this.env.logger.error('Incident creation failed', {
@@ -151,6 +163,7 @@ export default class extends Service<Env> {
         .run();
 
       // Call GPT for intelligent analysis and decision making
+      env.logger.info('About to call AI service', { traceId, model: 'gpt-oss-120b' });
       const gptResponse = await env.AI.run('gpt-oss-120b', {
         model: 'gpt-oss-120b',
         messages: [
@@ -257,6 +270,8 @@ Perform root cause analysis and determine if autonomous action is safe.`
         traceId,
         incidentId: incident.id,
         error: error.message,
+        stack: error.stack,
+        errorName: error.name,
         duration: Date.now() - analysisStart
       });
 
