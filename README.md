@@ -12,6 +12,9 @@ An AI-powered Site Reliability Engineering (SRE) agent built with the Raindrop f
 For product context, see `PRD.md`.
 
 ## Architecture
+
+<img width="1507" height="854" alt="image" src="https://github.com/user-attachments/assets/31eb87f6-2835-4ae8-83a9-cf123381ec59" />
+
 - **Single service**: `sre-agent`
   - HTTP endpoints using Hono
   - Agent loop with prompt-embedded tool definitions
